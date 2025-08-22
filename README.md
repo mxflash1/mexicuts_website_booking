@@ -221,4 +221,4 @@ For technical support or questions:
 
 ---
 
-**Built with ❤️ for the Mexi Cuts barbershop** 
+**Built with ❤️ for the Mexi Cuts barbershop**
