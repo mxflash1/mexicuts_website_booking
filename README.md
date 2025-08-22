@@ -88,6 +88,35 @@ A modern, responsive web application for the Mexi Cuts barbershop that allows cu
    firebase deploy
    ```
 
+## 🔒 Security Configuration
+
+### Important: API Keys and Credentials
+This project contains template files for Firebase configuration. **Never commit actual API keys to version control!**
+
+1. **Copy the template files:**
+   ```bash
+   cp public/admin.js.template public/admin.js
+   cp public/booking.js.template public/booking.js
+   ```
+
+2. **Update with your actual Firebase config:**
+   - Replace `YOUR_API_KEY_HERE` with your actual Firebase API key
+   - Replace `YOUR_PROJECT_ID` with your Firebase project ID
+   - Replace other placeholder values with your actual Firebase configuration
+
+3. **Verify .gitignore is working:**
+   - The `.gitignore` file is configured to exclude sensitive files
+   - Never commit files containing real API keys
+   - Use environment variables for production deployments
+
+### Security Best Practices
+- ✅ Use template files for configuration
+- ✅ Keep API keys out of version control
+- ✅ Use environment variables in production
+- ✅ Regularly rotate API keys
+- ❌ Never hardcode credentials in source code
+- ❌ Never commit sensitive files to Git
+
 ## 📱 Usage
 
 ### For Customers
