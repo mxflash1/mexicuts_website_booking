@@ -17,6 +17,13 @@ firebase-debug.*.log*
 # it commented so all members can deploy to the same project(s) in .firebaserc.
 # .firebaserc
 
+# Sensitive files - Google Cloud Service Account credentials
+*.json
+!package.json
+!package-lock.json
+!firebase.json
+!firebase-debug.log
+
 # Runtime data
 pids
 *.pid
