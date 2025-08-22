@@ -1,0 +1,294 @@
+/* Google Font */
+@import url('https://fonts.googleapis.com/css2?family=Raleway:wght@500&display=swap');
+@import url('https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css');
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=VT323&display=swap');
+
+
+
+body {
+  margin: 0;
+  font-family: 'Press Start 2P', monospace;
+  background-color: #000;
+  color: #fff;
+  line-height: 1.9;
+}
+
+header {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  padding: 20px;
+  background-color: #111;
+}
+
+nav ul {
+  list-style: none;
+  display: flex;
+  gap: 20px;
+}
+
+nav a {
+  color: #fff;
+  text-decoration: none;
+  transition: color 0.3s;
+}
+
+nav a:hover {
+  color: #CE1126;
+}
+
+.hero {
+  position: relative;
+  height: 70vh;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+#heroVideo {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: -1;
+  filter: blur(4px) brightness(0.4);
+}
+
+.hero-text {
+  z-index: 1;
+  background: rgba(0, 0, 0, 0.4);
+  padding: 20px;
+  border-radius: 8px;
+}
+
+.center-logo {
+  max-width: 300px;
+  width: 90%;
+  margin: 0 auto 20px;
+  display: block;
+}
+
+.hero-text p {
+  font-size: 1.2rem;
+  margin: 10px 0;
+}
+
+.cta {
+  display: inline-block;
+  margin-top: 10px;
+  padding: 10px 20px;
+  background: #006847;
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  text-decoration: none;
+  font-weight: bold;
+  transition: background 0.3s;
+  transition: all 0.2s ease;
+}
+
+.cta:active {
+    transform: scale(0.95);
+  }
+  
+
+.cta:hover {
+  background: #004f35;
+}
+
+.time-selected {
+    background-color: #CE1126 !important;
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.4);
+    transform: scale(0.90);
+    
+    transition: all 0.2s ease-in-out;
+  }
+  
+
+section {
+  padding: 40px 20px;
+  max-width: 800px;
+  margin: auto;
+}
+
+h2 {
+  color: #CE1126;
+}
+
+form {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    align-items: stretch;
+}
+  
+input, select, textarea, button {
+  padding: 10px;
+  border-radius: 5px;
+  border: none;
+  font-size: 1rem;
+}
+
+button {
+  background-color: #CE1126;
+  color: white;
+  cursor: pointer;
+  font-family: 'VT323', monospace !important;
+}
+
+button:hover {
+  background-color: #a60e1f;
+}
+
+footer {
+  background-color: #111;
+  text-align: center;
+  padding: 20px;
+  font-size: 0.9rem;
+  color: #ccc;
+}
+
+/* Time slot panel */
+#timeSlots {
+  display: none;
+  margin-top: 10px;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+#timeSlots.active {
+  display: flex;
+}
+
+#timeSlots button {
+  background-color: #006847;
+  color: white;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+#timeSlots button:hover {
+  background-color: #004f35;
+}
+
+#bookingDate {
+    background-color: white;
+    color: black;
+    border: none;
+    padding: 15px;
+    font-size: 1rem;
+    border-radius: 8px;
+    margin-bottom: 15px;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  
+#popupMessage {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background-color: #006847;
+    color: #fff;
+    padding: 16px 32px;
+    border-radius: 8px;
+    font-size: 1.2rem;
+    z-index: 9999;
+    opacity: 0;
+    transition: opacity 0.3s ease-in-out;
+    pointer-events: none;
+  }
+  
+  #popupMessage.show {
+    opacity: 1;
+  }
+
+  ::placeholder {
+    font-family: 'VT323', monospace;
+  }
+  
+  form > * {
+    margin-bottom: 10px;
+  }
+  
+  .flatpickr-calendar {
+    font-family: Arial, sans-serif !important;
+  }
+
+  a {
+    color: #006847; /* or use #00ff99 or whatever you want */
+    text-decoration: none;
+  }
+  
+  a:hover {
+    text-decoration: underline;
+  }
+  
+  .nav-logo {
+    height: 100px;
+    margin-right: auto;
+    margin-left: 10px;
+    cursor: pointer;
+  }
+  
+  @media (max-width: 768px) {
+    .nav-logo {
+      display: none;
+    }
+  }
+  
+  #calendar {
+    max-width: 900px;
+    margin: 40px auto;
+    background: #111;
+    padding: 20px;
+    border-radius: 8px;
+  }
+/* Modal styling */
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 999;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    background-color: rgba(0,0,0,0.85);
+    font-family: 'VT323', monospace;
+  }
+  
+  .modal-content {
+    background-color: #111;
+    color: #fff;
+    margin: 10% auto;
+    padding: 30px;
+    border: 2px solid #CE1126;
+    width: 80%;
+    max-width: 500px;
+    border-radius: 6px;
+    text-align: left;
+  }
+  
+  .modal-text {
+    white-space: pre-wrap;
+    font-size: 18px;
+    color: #00ffcc;
+  }
+  
+  .close-button {
+    color: #fff;
+    float: right;
+    font-size: 24px;
+    font-weight: bold;
+    cursor: pointer;
+  }
+    

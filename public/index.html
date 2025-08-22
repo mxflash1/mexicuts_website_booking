@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mexi_Cuts Barbershop</title>
+    <link rel="stylesheet" href="style.css" />
+  
+    <!-- Flatpickr Styles and Script -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+  
+    <!-- Firebase v9 compat mode (avoids using import) -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+  </head>
+  
+<body>
+  <header>
+    <img src="lil_logo_opened.png" id="navLogo" alt="Mexi Cuts logo" class="nav-logo" />
+    <nav>
+      <ul>
+        <li><a href="#about">About</a></li>
+        <li><a href="#booking">Book</a></li>
+        <li><a href="#contact">Contact</a></li>
+      </ul>
+    </nav>
+  </header>
+
+  <section class="hero">
+    <div class="hero-text">
+      <img src="logo_open.png" id="logoAnimated" alt="Mexi_Cuts logo" class="center-logo" />
+      <p>Clean fades. No wait.</p>
+      <a href="#booking" class="cta" onclick="triggerConfettiThenScroll(event)">Book Now</a>
+    </div>
+  </section>
+
+  <section id="about">
+    <h2>About Mexi_Cuts</h2>
+    <p>The best haircuts for your money. Only $20 with a professional standard. Run by your local teen barber.</p>
+    <p>📍Located in Peregian Springs, the centre of the Sunshine Coast.📍</p>
+  </section>
+
+  <section id="booking">
+    <h2>Book Your MexiCut</h2>
+    <p><strong>Each cut is $20. Times available:</strong><br>
+    Saturdays: 8:00am – 6:00pm<br>
+    Tuesdays & Thursdays: 3:30pm – 4:30pm</p>
+    <form id="bookingForm">
+      <input type="text" placeholder="Full Name" required />
+      <input type="tel" placeholder="Phone Number" required />
+      <textarea placeholder="Notes (optional)"></textarea>
+      <!-- calendar and timeSlots will be injected here -->
+      <button type="submit">Confirm Booking</button>
+    </form>
+  </section>
+
+  <footer id="contact">
+    <p>Contact: 0402098123</p>
+    <p>Follow us <a href="https://www.instagram.com/mexi_cuts/">@mexi_cuts</a> on Instagram</p>
+  </footer>
+
+  <!-- Final JS file with calendar + Firebase logic -->
+<script defer src="booking.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+
+</body>
+</html>
+ 
