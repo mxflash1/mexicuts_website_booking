@@ -3,31 +3,345 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Mexi_Cuts Calendar</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Mexi_Cuts Admin - Mobile</title>
 
   <link rel="stylesheet" href="style.css" />
 
   <!-- FullCalendar -->
   <link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.9/index.global.min.css" rel="stylesheet" />
   <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.9/index.global.min.js"></script>
+  
+  <!-- Custom Dark Theme Styles -->
+  <style>
+    /* FullCalendar Dark Theme */
+    .fc {
+      background: #1a1a1a !important;
+      color: white !important;
+    }
+    
+    .fc-theme-standard .fc-scrollgrid {
+      border: 1px solid #444 !important;
+    }
+    
+    .fc-theme-standard td, .fc-theme-standard th {
+      border: 1px solid #444 !important;
+    }
+    
+    .fc-col-header-cell {
+      background: #2a2a2a !important;
+      color: #CE1126 !important;
+      font-weight: bold !important;
+    }
+    
+    .fc-daygrid-day {
+      background: #1a1a1a !important;
+    }
+    
+    .fc-daygrid-day:hover {
+      background: #2a2a2a !important;
+    }
+    
+    .fc-event {
+      background: #CE1126 !important;
+      border: 1px solid #CE1126 !important;
+      color: white !important;
+    }
+    
+    .fc-event:hover {
+      background: #a00f1f !important;
+      border: 1px solid #a00f1f !important;
+    }
+    
+    .fc-button {
+      background: #CE1126 !important;
+      border: 1px solid #CE1126 !important;
+      color: white !important;
+    }
+    
+    .fc-button:hover {
+      background: #a00f1f !important;
+      border: 1px solid #a00f1f !important;
+    }
+    
+    .fc-button:disabled {
+      background: #555 !important;
+      border: 1px solid #555 !important;
+      color: #999 !important;
+    }
+    
+    .fc-toolbar-title {
+      color: white !important;
+      font-weight: bold !important;
+    }
+    
+    .fc-timegrid-slot {
+      border-top: 1px solid #333 !important;
+    }
+    
+    .fc-timegrid-axis {
+      background: #2a2a2a !important;
+      color: #ccc !important;
+    }
+    
+    .fc-scrollgrid-sync-inner {
+      background: #1a1a1a !important;
+    }
+    
+    /* Mobile-First Responsive Design */
+    @media (max-width: 768px) {
+      body {
+        padding: 10px !important;
+      }
+      
+      h2 {
+        font-size: 22px !important;
+        margin-bottom: 20px !important;
+      }
+      
+      /* Stack layout vertically on mobile */
+      body > div:first-of-type {
+        grid-template-columns: 1fr !important;
+        gap: 15px !important;
+        max-width: 100% !important;
+      }
+      
+      /* Availability Management Mobile */
+      #availability-management {
+        padding: 20px 15px !important;
+        max-height: none !important;
+        overflow-y: visible !important;
+      }
+      
+      #availability-management h3 {
+        font-size: 18px !important;
+        margin-bottom: 15px !important;
+      }
+      
+      #availability-management p {
+        font-size: 13px !important;
+        margin-bottom: 20px !important;
+      }
+      
+      /* Calendar Mobile */
+      #availability-management + div {
+        padding: 20px 15px !important;
+        max-height: none !important;
+        overflow-y: visible !important;
+      }
+      
+      #availability-management + div h3 {
+        font-size: 18px !important;
+        margin-bottom: 15px !important;
+      }
+      
+      #availability-management + div p {
+        font-size: 13px !important;
+        margin-bottom: 20px !important;
+      }
+      
+      /* Calendar specific mobile adjustments */
+      #calendar {
+        padding: 10px !important;
+      }
+      
+      /* Save button mobile */
+      #save-availability {
+        width: 100% !important;
+        padding: 15px !important;
+        font-size: 16px !important;
+      }
+      
+      /* Mobile modal adjustments */
+      .modal-content {
+        margin: 10px !important;
+        padding: 20px !important;
+        width: calc(100% - 20px) !important;
+        max-width: none !important;
+      }
+      
+      /* Status messages mobile */
+      #statusMessage {
+        top: 10px !important;
+        right: 10px !important;
+        left: 10px !important;
+        transform: translateY(-100px) !important;
+        font-size: 14px !important;
+        padding: 12px 15px !important;
+      }
+      
+      #statusMessage.show {
+        transform: translateY(0) !important;
+      }
+      
+      /* Delete confirmation mobile */
+      #deleteConfirmation > div {
+        margin: 10px !important;
+        padding: 25px 20px !important;
+        max-width: none !important;
+        width: calc(100% - 20px) !important;
+      }
+      
+      /* Form inputs mobile */
+      input, select, textarea {
+        font-size: 16px !important; /* Prevents iOS zoom */
+        padding: 12px !important;
+      }
+      
+      /* Button improvements for touch */
+      button {
+        min-height: 44px !important; /* iOS touch target */
+        font-size: 16px !important;
+      }
+      
+      /* Checkbox improvements for touch */
+      input[type="checkbox"] {
+        transform: scale(1.5) !important;
+        margin-right: 15px !important;
+      }
+    }
+    
+    /* Tablet adjustments */
+    @media (min-width: 769px) and (max-width: 1200px) {
+      body > div:first-of-type {
+        grid-template-columns: 1fr !important;
+        gap: 20px !important;
+      }
+      
+      #availability-management, 
+      #availability-management + div {
+        max-height: none !important;
+      }
+    }
+    
+    /* FullCalendar Mobile Improvements */
+    @media (max-width: 768px) {
+      .fc-toolbar {
+        flex-direction: column !important;
+        gap: 10px !important;
+      }
+      
+      .fc-toolbar-chunk {
+        display: flex !important;
+        justify-content: center !important;
+      }
+      
+      .fc-button {
+        padding: 8px 12px !important;
+        font-size: 14px !important;
+        min-height: 44px !important;
+      }
+      
+      .fc-toolbar-title {
+        font-size: 18px !important;
+        margin: 10px 0 !important;
+      }
+      
+      .fc-timegrid-axis {
+        font-size: 12px !important;
+      }
+      
+      .fc-timegrid-slot-label {
+        font-size: 11px !important;
+      }
+      
+      .fc-event {
+        font-size: 12px !important;
+        padding: 2px 4px !important;
+      }
+      
+      .fc-col-header-cell {
+        font-size: 12px !important;
+        padding: 8px 2px !important;
+      }
+    }
+  </style>
 
   <!-- Firebase compat -->
   <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
 </head>
-<body class="admin">
-  <h2 style="text-align:center; color:#CE1126;">📅 Mexi_Cuts Calendar</h2>
-  <div id="calendar" style="max-width: 1000px; margin: 40px auto;"></div>
+<body class="admin" style="background: #1a1a1a; color: white; margin: 0; padding: 20px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+  <h2 style="text-align:center; color:#CE1126; margin-bottom: 30px; font-size: 28px;">📅 Mexi_Cuts Admin Dashboard</h2>
+  
+  <!-- Main Container with Side-by-Side Layout -->
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px; max-width: 1800px; margin: 0 auto; min-height: 80vh;">
+    
+    <!-- Left Side: Availability Management -->
+    <div id="availability-management" style="background: #2a2a2a; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); border: 2px solid #CE1126; overflow-y: auto; max-height: 90vh;">
+      <h3 style="color:#CE1126; margin-bottom: 20px; text-align: center; font-size: 22px;">⚙️ Manage Availability</h3>
+      <p style="text-align: center; color: #ccc; margin-bottom: 25px; font-size: 14px;">Enable days and set working hours. Changes update your booking page instantly.</p>
+      
+      <div id="availability-form">
+        <!-- Form will be generated here -->
+      </div>
+      
+      <div style="text-align: center; margin-top: 25px; padding-top: 20px; border-top: 1px solid #444;">
+        <button id="save-availability" style="background:#CE1126; color:white; padding:12px 25px; border:none; border-radius:8px; cursor:pointer; font-size:15px; font-weight:bold; box-shadow: 0 2px 10px rgba(206,17,38,0.4); transition: all 0.3s; width: 200px;">
+          💾 Save Changes
+        </button>
+        <div id="save-status" style="margin-top:12px; font-weight:bold; font-size:14px;"></div>
+      </div>
+    </div>
 
+    <!-- Right Side: Calendar -->
+    <div style="background: #2a2a2a; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); border: 2px solid #CE1126; overflow-y: auto; max-height: 90vh;">
+      <h3 style="color:#CE1126; margin-bottom: 20px; text-align: center; font-size: 22px;">📅 Booking Calendar</h3>
+      <p style="text-align: center; color: #ccc; margin-bottom: 25px; font-size: 14px;">View all your appointments and bookings.</p>
+      <div id="calendar" style="background: #1a1a1a; border-radius: 8px; padding: 15px;"></div>
+    </div>
+    
+  </div>
+
+  <!-- Firebase configuration manager -->
+  <script src="firebase-env.js"></script>
+  <script src="firebase-config.js"></script>
+  <!-- Availability utilities -->
+  <script src="availability-utils.js"></script>
+  <script src="admin-availability.js"></script>
   <!-- Firebase + calendar logic -->
   <script src="admin.js"></script>
-  <div id="appointmentModal" class="modal" style="display:none;">
-  <div class="modal-content">
-    <span class="close-button">&times;</span>
-    <pre id="appointmentDetails" class="modal-text"></pre>
+  
+  <!-- Booking Management Modal -->
+  <div id="bookingModal" class="modal" style="display:none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.8);">
+    <div class="modal-content" style="background: #2a2a2a; margin: 5% auto; padding: 30px; width: 90%; max-width: 500px; border-radius: 12px; border: 2px solid #CE1126; color: white;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; border-bottom: 1px solid #444; padding-bottom: 15px;">
+        <h3 style="color: #CE1126; margin: 0; font-size: 22px;">✏️ Manage Booking</h3>
+        <span class="close-booking-modal" style="color: #ccc; font-size: 28px; font-weight: bold; cursor: pointer; line-height: 1;">&times;</span>
+      </div>
+      
+      <form id="bookingForm" style="display: grid; gap: 20px;">
+        <div>
+          <label style="display: block; margin-bottom: 8px; color: #ccc; font-weight: 600;">👤 Customer Name:</label>
+          <input type="text" id="editName" required style="width: 100%; padding: 12px; border: 1px solid #555; border-radius: 6px; background: #1a1a1a; color: white; font-size: 14px;">
+        </div>
+        
+        <div>
+          <label style="display: block; margin-bottom: 8px; color: #ccc; font-weight: 600;">📱 Phone Number:</label>
+          <input type="tel" id="editPhone" required style="width: 100%; padding: 12px; border: 1px solid #555; border-radius: 6px; background: #1a1a1a; color: white; font-size: 14px;">
+        </div>
+        
+        <div>
+          <label style="display: block; margin-bottom: 8px; color: #ccc; font-weight: 600;">🕐 Appointment Time:</label>
+          <input type="text" id="editTimeSlot" required style="width: 100%; padding: 12px; border: 1px solid #555; border-radius: 6px; background: #1a1a1a; color: white; font-size: 14px;" placeholder="2025-08-23 2:00 PM">
+        </div>
+        
+        <div>
+          <label style="display: block; margin-bottom: 8px; color: #ccc; font-weight: 600;">📝 Notes:</label>
+          <textarea id="editNotes" rows="3" style="width: 100%; padding: 12px; border: 1px solid #555; border-radius: 6px; background: #1a1a1a; color: white; font-size: 14px; resize: vertical;"></textarea>
+        </div>
+        
+        <div style="display: flex; gap: 15px; margin-top: 10px;">
+          <button type="submit" style="flex: 1; background: #4CAF50; color: white; padding: 12px 20px; border: none; border-radius: 6px; cursor: pointer; font-size: 15px; font-weight: bold;">
+            💾 Update Booking
+          </button>
+          <button type="button" id="deleteBooking" style="flex: 1; background: #f44336; color: white; padding: 12px 20px; border: none; border-radius: 6px; cursor: pointer; font-size: 15px; font-weight: bold;">
+            🗑️ Delete Booking
+          </button>
+        </div>
+      </form>
+    </div>
   </div>
-</div>
 
 </body>
 </html>

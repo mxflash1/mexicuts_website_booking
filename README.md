@@ -91,23 +91,30 @@ A modern, responsive web application for the Mexi Cuts barbershop that allows cu
 ## 🔒 Security Configuration
 
 ### Important: API Keys and Credentials
-This project contains template files for Firebase configuration. **Never commit actual API keys to version control!**
+This project uses a secure configuration system to protect Firebase credentials. **Never commit actual API keys to version control!**
 
-1. **Copy the template files:**
+**🚨 SECURITY UPDATE:** The project now uses a secure configuration manager instead of hardcoded credentials.
+
+1. **For Development:**
    ```bash
-   cp public/admin.js.template public/admin.js
-   cp public/booking.js.template public/booking.js
+   cp public/firebase-config.json.example public/firebase-config.json
+   # Edit firebase-config.json with your real Firebase credentials
    ```
 
-2. **Update with your actual Firebase config:**
-   - Replace `YOUR_API_KEY_HERE` with your actual Firebase API key
-   - Replace `YOUR_PROJECT_ID` with your Firebase project ID
-   - Replace other placeholder values with your actual Firebase configuration
+2. **For Production:**
+   ```bash
+   node deploy-setup.js production
+   # Or set up environment variables in your hosting platform
+   ```
 
-3. **Verify .gitignore is working:**
-   - The `.gitignore` file is configured to exclude sensitive files
-   - Never commit files containing real API keys
-   - Use environment variables for production deployments
+3. **Detailed Setup Instructions:**
+   See [SECURITY-SETUP.md](SECURITY-SETUP.md) for complete security configuration guide.
+
+**✅ What's Secure Now:**
+- Firebase credentials loaded dynamically
+- Real API keys never committed to git
+- Environment variable support for production
+- User-friendly error messages for missing config
 
 ### Security Best Practices
 - ✅ Use template files for configuration

@@ -3,7 +3,21 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Mexi_Cuts Barbershop</title>
+    <title>Mexi Cuts - Professional Barbershop</title>
+    <meta name="description" content="Professional barbershop services in Peregian Springs, Sunshine Coast. Book your haircut appointment online. Quality cuts, great prices, friendly service." />
+    <meta name="keywords" content="barbershop, haircut, Peregian Springs, Sunshine Coast, men's grooming, professional barber" />
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon.png" />
+    <link rel="apple-touch-icon" href="favicon.png" />
+    <link rel="shortcut icon" href="favicon.png" />
+    
+    <!-- Open Graph / Social Media -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Mexi Cuts - Professional Barbershop" />
+    <meta property="og:description" content="Professional barbershop services in Peregian Springs, Sunshine Coast. Book your appointment online." />
+    <meta property="og:image" content="favicon.png" />
+    
     <link rel="stylesheet" href="style.css" />
   
     <!-- Flatpickr Styles and Script -->
@@ -38,7 +52,16 @@
   <section id="about">
     <h2>About Mexi_Cuts</h2>
     <p>The best haircuts for your money. Only $20 with a professional standard. Run by your local teen barber.</p>
-    <p>📍Located in Peregian Springs, the centre of the Sunshine Coast.📍</p>
+    <p><strong>Visit us at:</strong><br>
+    <a href="https://maps.google.com/?q=6+Rosella+Tce,+Peregian+Springs,+Sunshine+Coast,+QLD,+Australia" 
+       target="_blank" 
+       class="address-button">
+       6 Rosella Tce, Peregian Springs<br>
+      Sunshine Coast, QLD
+    </a></p>
+    <p style="margin-top: 15px; font-size: 14px; color: #666;">
+      <em>Tap the address above to open in your navigation app</em>
+    </p>
   </section>
 
   <section id="booking">
@@ -60,6 +83,11 @@
     <p>Follow us <a href="https://www.instagram.com/mexi_cuts/">@mexi_cuts</a> on Instagram</p>
   </footer>
 
+  <!-- Firebase configuration manager -->
+<script src="firebase-env.js"></script>
+  <script src="firebase-config.js"></script>
+  <!-- Availability configuration utilities -->
+<script src="availability-utils.js"></script>
   <!-- Final JS file with calendar + Firebase logic -->
 <script defer src="booking.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>

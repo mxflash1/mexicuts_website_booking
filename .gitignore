@@ -24,6 +24,11 @@ firebase-debug.*.log*
 !firebase.json
 !firebase-debug.log
 
+# Firebase configuration files (contain sensitive API keys)
+firebase-config.json
+public/firebase-config.json
+public/firebase-env.js
+
 # Runtime data
 pids
 *.pid

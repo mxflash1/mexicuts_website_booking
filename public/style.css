@@ -291,4 +291,114 @@ footer {
     font-weight: bold;
     cursor: pointer;
   }
+
+/* Address Button Styles */
+.address-button {
+  color: #CE1126 !important;
+  text-decoration: none !important;
+  font-weight: bold !important;
+  display: inline-block !important;
+  padding: 12px 16px !important;
+  border: 2px solid #CE1126 !important;
+  border-radius: 8px !important;
+  margin-top: 10px !important;
+  transition: all 0.3s ease !important;
+  text-align: center !important;
+  line-height: 1.4 !important;
+  font-size: 14px !important;
+}
+
+.address-button:hover {
+  background-color: #CE1126 !important;
+  color: white !important;
+  transform: translateY(-2px) !important;
+  box-shadow: 0 4px 12px rgba(206, 17, 38, 0.3) !important;
+}
+
+.address-button:active {
+  transform: translateY(0) !important;
+}
+
+/* Mobile address button */
+@media (max-width: 768px) {
+  .address-button {
+    width: 100% !important;
+    max-width: 280px !important;
+    padding: 15px 20px !important;
+    font-size: 15px !important;
+    margin: 15px auto 10px auto !important;
+    display: block !important;
+  }
+  
+  .address-button:hover {
+    transform: none !important;
+  }
+  
+  .address-button:active {
+    background-color: #CE1126 !important;
+    color: white !important;
+  }
+
+  /* Mobile booking form styling */
+  #booking {
+    padding: 20px 15px !important;
+  }
+
+  #bookingForm {
+    max-width: 100% !important;
+    padding: 0 !important;
+  }
+
+  #bookingForm input,
+  #bookingForm textarea {
+    width: 100% !important;
+    box-sizing: border-box !important;
+    margin-bottom: 15px !important;
+    font-size: 16px !important; /* Prevents zoom on iOS */
+    padding: 15px !important;
+    border-radius: 8px !important;
+  }
+
+  #bookingDate {
+    background-color: white !important;
+    color: black !important;
+    border: 2px solid #ddd !important;
+    cursor: pointer !important;
+    -webkit-appearance: none !important;
+    -moz-appearance: none !important;
+    appearance: none !important;
+  }
+
+  #bookingDate:focus {
+    border-color: #006847 !important;
+    outline: none !important;
+  }
+
+  /* Time slots mobile styling */
+  #timeSlots {
+    display: grid !important;
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 10px !important;
+    margin: 15px 0 !important;
+  }
+
+  #timeSlots button {
+    padding: 12px 8px !important;
+    font-size: 14px !important;
+    border-radius: 6px !important;
+  }
+
+  /* Flatpickr mobile adjustments */
+  .flatpickr-calendar {
+    font-size: 16px !important;
+    width: 100% !important;
+    max-width: 320px !important;
+  }
+
+  .flatpickr-day {
+    height: 40px !important;
+    line-height: 40px !important;
+    max-width: 40px !important;
+  }
+}
     
