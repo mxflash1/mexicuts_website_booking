@@ -70,14 +70,16 @@ function parseAppointmentTime(timeSlot) {
     }
     
     // Create date in Australian timezone (Brisbane)
-    const appointmentDate = new Date();
-    appointmentDate.setFullYear(parseInt(year));
-    appointmentDate.setMonth(parseInt(month) - 1); // Month is 0-indexed
-    appointmentDate.setDate(parseInt(day));
-    appointmentDate.setHours(hour24);
-    appointmentDate.setMinutes(parseInt(minute));
-    appointmentDate.setSeconds(0);
-    appointmentDate.setMilliseconds(0);
+    // Note: JavaScript Date constructor interprets time as local time
+    const appointmentDate = new Date(
+      parseInt(year),
+      parseInt(month) - 1, // Month is 0-indexed
+      parseInt(day),
+      hour24,
+      parseInt(minute),
+      0, // seconds
+      0  // milliseconds
+    );
     
     return appointmentDate;
   } catch (error) {
@@ -86,14 +88,38 @@ function parseAppointmentTime(timeSlot) {
   }
 }
 
-// Function to check if appointment is exactly 24 hours away (within 1 hour window)
+// Function to format date in readable format (e.g., "24, August, Wednesday")
+function formatReadableDate(timeSlot) {
+  try {
+    // timeSlot format: "2025-08-23 05:30 PM"
+    const [datePart, timePart, ampm] = timeSlot.split(' ');
+    const [year, month, day] = datePart.split('-');
+    
+    const date = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+    
+    const dayOfMonth = date.getDate();
+    const monthName = date.toLocaleDateString('en-AU', { month: 'long' });
+    const dayOfWeek = date.toLocaleDateString('en-AU', { weekday: 'long' });
+    
+    return `${dayOfMonth}, ${monthName}, ${dayOfWeek}`;
+  } catch (error) {
+    console.error('Error formatting date:', error);
+    return timeSlot; // Fallback to original format if error
+  }
+}
+
+// Function to check if appointment is exactly 24 hours away (within 15 minute window)
 function isAppointmentTomorrow(appointmentDate) {
   const now = new Date();
   const timeDiff = appointmentDate.getTime() - now.getTime();
   const hoursDiff = timeDiff / (1000 * 60 * 60);
   
-  // Check if appointment is between 23 and 25 hours away (1-hour window for reminders)
-  return hoursDiff >= 23 && hoursDiff <= 25;
+  console.log(`Current time: ${now.toLocaleString('en-AU', { timeZone: 'Australia/Brisbane' })}`);
+  console.log(`Appointment time: ${appointmentDate.toLocaleString('en-AU', { timeZone: 'Australia/Brisbane' })}`);
+  console.log(`Hours difference: ${hoursDiff.toFixed(2)}`);
+  
+  // Check if appointment is exactly 24 hours away (±15 minutes for function timing)
+  return hoursDiff >= 23.75 && hoursDiff <= 24.25;
 }
 
 // Function to backup booking data to Google Sheets
@@ -246,7 +272,8 @@ exports.sendBookingNotification = onDocumentCreated(
         try {
           const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
           
-          const smsMessage = `🎉 Your Mexi Cuts appointment is confirmed!\n\n📅 Date & Time: ${bookingData.timeSlot}\n💇‍♂️ Service: Haircut\n💰 Price: $20\n\n📍 Location: 6 Rosella Tce, Peregian Springs\n📱 Contact: 0402098123\n📸 Instagram: @mexi_cuts\n\nPlease arrive 5 minutes early. Cancellations: 24hr notice required.\n\nDO NOT REPLY`;
+          const formattedDate = formatReadableDate(bookingData.timeSlot);
+          const smsMessage = `🎉 Your Mexi Cuts appointment is confirmed!\n\n📅 Date: ${formattedDate}\n⏰ Time: ${bookingData.timeSlot.split(' ')[1]} ${bookingData.timeSlot.split(' ')[2]}\n💇‍♂️ Service: Haircut\n💰 Price: $20\n\n📍 Location: 6 Rosella Tce, Peregian Springs\n📱 Contact: 0402098123\n📸 Instagram: @mexi_cuts\n\nPlease arrive 5 minutes early. Cancellations: 24hr notice required.\n\nDO NOT REPLY`;
 
           await client.messages.create({
             body: smsMessage,
@@ -291,10 +318,10 @@ exports.deleteBookingNotification = onDocumentDeleted(
   }
 );
 
-// Scheduled function to send appointment reminders (runs every hour)
+// Scheduled function to send appointment reminders (runs every 15 minutes for precision)
 exports.sendAppointmentReminders = onSchedule(
   {
-    schedule: 'every 1 hours',
+    schedule: 'every 1 minutes',
     timeZone: 'Australia/Brisbane',
     region: 'us-central1',
     secrets: [TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER]
@@ -302,14 +329,17 @@ exports.sendAppointmentReminders = onSchedule(
   async (event) => {
     try {
       console.log('🔔 Checking for appointments that need reminders...');
+      console.log('Current time:', new Date().toISOString());
       
       // Get all bookings from Firestore
       const bookingsSnapshot = await admin.firestore().collection('bookings').get();
       
       if (bookingsSnapshot.empty) {
-        console.log('No bookings found');
+        console.log('❌ No bookings found in database');
         return;
       }
+      
+      console.log(`📋 Found ${bookingsSnapshot.size} booking(s) in database`);
       
       const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
       let remindersSent = 0;
@@ -319,18 +349,33 @@ exports.sendAppointmentReminders = onSchedule(
         const booking = doc.data();
         const bookingId = doc.id;
         
+        console.log(`\n--- Booking ${bookingId} ---`);
+        console.log(`Name: ${booking.name || 'N/A'}`);
+        console.log(`Phone: ${booking.phone || 'N/A'}`);
+        console.log(`Time Slot: ${booking.timeSlot || 'N/A'}`);
+        console.log(`Reminder Sent: ${booking.reminderSent || false}`);
+        
         if (!booking.timeSlot || !booking.phone || !booking.name) {
+          console.log('⚠️ Incomplete booking - skipping');
           continue; // Skip incomplete bookings
         }
         
         // Parse the appointment time
         const appointmentDate = parseAppointmentTime(booking.timeSlot);
         if (!appointmentDate) {
-          console.log(`Could not parse appointment time for booking ${bookingId}: ${booking.timeSlot}`);
+          console.log(`❌ Could not parse appointment time: ${booking.timeSlot}`);
           continue;
         }
         
-        // Check if this appointment is exactly 24 hours away
+        console.log(`Parsed appointment time: ${appointmentDate.toISOString()}`);
+        
+        const now = new Date();
+        const timeDiff = appointmentDate.getTime() - now.getTime();
+        const hoursDiff = timeDiff / (1000 * 60 * 60);
+        console.log(`Hours until appointment: ${hoursDiff.toFixed(2)}`);
+        console.log(`Should send reminder: ${hoursDiff >= 23.75 && hoursDiff <= 24.25}`);
+        
+        // Check if this appointment is exactly 24 hours away (±15 minutes)
         if (isAppointmentTomorrow(appointmentDate)) {
           // Check if we've already sent a reminder for this booking
           if (booking.reminderSent) {
@@ -340,7 +385,8 @@ exports.sendAppointmentReminders = onSchedule(
           
           try {
             // Send reminder SMS
-            const reminderMessage = `🔔 Reminder: Your Mexi Cuts appointment is tomorrow!\n\n📅 ${booking.timeSlot}\n💇‍♂️ Service: Haircut ($20)\n📍 6 Rosella Tce, Peregian Springs\n\nPlease arrive 5 minutes early. Need to cancel? Call 0402098123\n\nDO NOT REPLY`;
+            const formattedDate = formatReadableDate(booking.timeSlot);
+            const reminderMessage = `🔔 Reminder: Your Mexi Cuts appointment is tomorrow!\n\n📅 Date: ${formattedDate}\n⏰ Time: ${booking.timeSlot.split(' ')[1]} ${booking.timeSlot.split(' ')[2]}\n💇‍♂️ Service: Haircut ($20)\n📍 6 Rosella Tce, Peregian Springs\n\nPlease arrive 5 minutes early. Need to cancel? Call 0402098123\n\nDO NOT REPLY`;
             
             await client.messages.create({
               body: reminderMessage,

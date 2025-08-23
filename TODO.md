@@ -30,6 +30,9 @@
   - [X] Make business hours easily adjustable
   - Calently
 
+  Block off bookings 12hrs before
+  Get rid of adress on website, just have general location, and they receieve the adress when they book an appointment, it gets sent to their messages, in a clickable format.
+
 ---
 
 **Last Updated:** [Current Date]
