@@ -23,7 +23,7 @@ class AvailabilityManager {
 
     // Fallback to JSON file
     try {
-      const response = await fetch('availability-config.json');
+      const response = await fetch('config/availability-config.json');
       this.config = await response.json();
       return this.config;
     } catch (error) {
@@ -41,7 +41,8 @@ class AvailabilityManager {
         Tuesday: { enabled: true, startTime: "15:30", endTime: "16:30", slotDuration: 30 },
         Thursday: { enabled: true, startTime: "15:30", endTime: "16:30", slotDuration: 30 }
       },
-      settings: { timeFormat: "12hour" }
+      settings: { timeFormat: "12hour" },
+      blockedDates: {} // Empty blocked dates for fallback
     };
   }
 
@@ -114,6 +115,37 @@ class AvailabilityManager {
     );
 
     return `${this.config.displayText.availabilityDescription}<br>${scheduleLines.join('<br>')}`;
+  }
+
+  // Check if a specific date is blocked
+  isDateBlocked(dateStr) {
+    if (!this.config || !this.config.blockedDates) {
+      return false;
+    }
+    return !!this.config.blockedDates[dateStr]; // Convert to boolean
+  }
+
+  // Get all blocked dates
+  getBlockedDates() {
+    if (!this.config || !this.config.blockedDates) {
+      return [];
+    }
+    return Object.keys(this.config.blockedDates);
+  }
+
+  // Check if a date should be available for booking
+  isDateAvailable(dateStr) {
+    // Check if date is blocked
+    if (this.isDateBlocked(dateStr)) {
+      return false;
+    }
+
+    // Check if the day of week is enabled
+    const date = new Date(dateStr);
+    const dayName = date.toLocaleString('en-US', { weekday: 'long' });
+    const dayConfig = this.config.businessHours[dayName];
+    
+    return dayConfig && dayConfig.enabled;
   }
 }
 

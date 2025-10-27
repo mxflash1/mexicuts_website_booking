@@ -1,0 +1,29 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Users collection
+    match /users/{userId} {
+      // Anyone can read users (needed for admin page)
+      allow read: if true;
+      // Anyone can update/delete users (needed for admin page)
+      // In production, you'd want to restrict this to admin users only
+      allow update, delete: if true;
+      // Allow users to create their own document during signup
+      allow create: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // Bookings collection - open for now (adjust if needed)
+    match /bookings/{bookingId} {
+      allow read, create, update, delete: if true;
+    }
+    
+    // Settings collection - anyone can read and write (for admin panel)
+    // In production, you'd want to restrict write access to admin users only
+    match /settings/{document=**} {
+      allow read: if true;
+      allow write: if true;
+    }
+  }
+}
+

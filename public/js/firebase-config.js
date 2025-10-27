@@ -17,7 +17,7 @@ class FirebaseConfigManager {
 
     // Fallback to local config file (for development)
     try {
-      const response = await fetch('./firebase-config.json');
+      const response = await fetch('./config/firebase-config.json');
       if (response.ok) {
         this.config = await response.json();
         console.log('🔒 Loaded Firebase config from local file');

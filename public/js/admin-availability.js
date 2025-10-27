@@ -25,7 +25,8 @@ class AdminAvailabilityManager {
           Tuesday: "Tuesdays: 3:30pm – 4:30pm", 
           Thursday: "Thursdays: 3:30pm – 4:30pm"
         }
-      }
+      },
+      blockedDates: {} // Store blocked dates as { "2025-01-15": { reason: "Holiday", blockedAt: timestamp } }
     };
   }
 
@@ -35,6 +36,10 @@ class AdminAvailabilityManager {
       const doc = await this.db.collection('settings').doc('availability').get();
       if (doc.exists) {
         this.config = doc.data();
+        // Ensure blockedDates exists
+        if (!this.config.blockedDates) {
+          this.config.blockedDates = {};
+        }
         console.log('Loaded config from Firebase:', this.config);
       } else {
         console.log('No config found, using default');
@@ -230,7 +235,8 @@ class AdminAvailabilityManager {
   // Generate time options for dropdowns
   generateTimeOptions() {
     const times = [];
-    for (let hour = 6; hour <= 22; hour++) {
+    // Start from 5:00 AM (hour = 5) instead of 6:00 AM
+    for (let hour = 5; hour <= 22; hour++) {
       for (let minute = 0; minute < 60; minute += 30) {
         const timeStr = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
         times.push(timeStr);
@@ -379,6 +385,206 @@ class AdminAvailabilityManager {
     const endDisplay = this.formatTimeForDisplay(endTime);
     
     previewDiv.innerHTML = `${startDisplay} - ${endDisplay} (${duration}min slots)`;
+  }
+
+  // Initialize blocked dates management
+  initializeBlockedDates() {
+    this.renderBlockedDatesList();
+    this.setupBlockedDatesEventListeners();
+  }
+
+  // Render the blocked dates list
+  renderBlockedDatesList() {
+    const listContainer = document.getElementById('blockedDatesList');
+    if (!listContainer) return;
+
+    const blockedDates = this.config.blockedDates || {};
+    const dates = Object.keys(blockedDates).sort();
+
+    if (dates.length === 0) {
+      listContainer.innerHTML = `
+        <div style="text-align: center; color: #666; padding: 20px; font-style: italic;">
+          No blocked dates set.<br>
+          <small style="color: #888;">Add dates above to prevent bookings.</small>
+        </div>
+      `;
+      return;
+    }
+
+    let html = '';
+    dates.forEach(dateStr => {
+      const dateInfo = blockedDates[dateStr];
+      const formattedDate = this.formatDateForDisplay(dateStr);
+      
+      html += `
+        <div style="
+          background: #1a1a1a; 
+          border: 1px solid #555; 
+          border-radius: 6px; 
+          padding: 12px; 
+          margin-bottom: 8px;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+        ">
+          <div>
+            <div style="color: #f44336; font-weight: bold; font-size: 14px;">🚫 ${formattedDate}</div>
+            ${dateInfo.reason ? `<div style="color: #ccc; font-size: 12px; margin-top: 2px;">${dateInfo.reason}</div>` : ''}
+          </div>
+          <button onclick="adminAvailability.removeBlockedDate('${dateStr}')" 
+                  style="
+                    background: #666; 
+                    color: white; 
+                    border: none; 
+                    padding: 6px 10px; 
+                    border-radius: 4px; 
+                    cursor: pointer; 
+                    font-size: 11px;
+                    transition: background 0.2s;
+                  "
+                  onmouseover="this.style.background='#f44336'"
+                  onmouseout="this.style.background='#666'">
+            Remove
+          </button>
+        </div>
+      `;
+    });
+
+    listContainer.innerHTML = html;
+  }
+
+  // Setup event listeners for blocked dates
+  setupBlockedDatesEventListeners() {
+    const addBtn = document.getElementById('addBlockedDateBtn');
+    const dateInput = document.getElementById('blockDateInput');
+    const reasonInput = document.getElementById('blockReasonInput');
+
+    if (addBtn) {
+      addBtn.addEventListener('click', () => this.addBlockedDate());
+    }
+
+    // Allow Enter key to add blocked date
+    if (dateInput) {
+      dateInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+          this.addBlockedDate();
+        }
+      });
+    }
+
+    if (reasonInput) {
+      reasonInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+          this.addBlockedDate();
+        }
+      });
+    }
+  }
+
+  // Add a blocked date
+  async addBlockedDate() {
+    const dateInput = document.getElementById('blockDateInput');
+    const reasonInput = document.getElementById('blockReasonInput');
+    const statusDiv = document.getElementById('blocked-dates-status');
+
+    if (!dateInput || !reasonInput || !statusDiv) return;
+
+    const dateStr = dateInput.value.trim();
+    const reason = reasonInput.value.trim();
+
+    if (!dateStr) {
+      statusDiv.innerHTML = '❌ Please select a date';
+      statusDiv.style.color = '#f44336';
+      setTimeout(() => { statusDiv.innerHTML = ''; }, 3000);
+      return;
+    }
+
+    // Check if date is in the past
+    const selectedDate = new Date(dateStr);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    if (selectedDate < today) {
+      statusDiv.innerHTML = '❌ Cannot block dates in the past';
+      statusDiv.style.color = '#f44336';
+      setTimeout(() => { statusDiv.innerHTML = ''; }, 3000);
+      return;
+    }
+
+    // Ensure blockedDates exists
+    if (!this.config.blockedDates) {
+      this.config.blockedDates = {};
+    }
+
+    // Check if date is already blocked
+    if (this.config.blockedDates[dateStr]) {
+      statusDiv.innerHTML = '❌ This date is already blocked';
+      statusDiv.style.color = '#f44336';
+      setTimeout(() => { statusDiv.innerHTML = ''; }, 3000);
+      return;
+    }
+
+    // Add to config
+    this.config.blockedDates[dateStr] = {
+      reason: reason || 'Blocked',
+      blockedAt: new Date().toISOString()
+    };
+
+    // Update UI
+    this.renderBlockedDatesList();
+    
+    // Clear inputs
+    dateInput.value = '';
+    reasonInput.value = '';
+
+    // Show success message
+    statusDiv.innerHTML = '✅ Date blocked successfully!';
+    statusDiv.style.color = '#4CAF50';
+    setTimeout(() => { statusDiv.innerHTML = ''; }, 3000);
+  }
+
+  // Remove a blocked date
+  async removeBlockedDate(dateStr) {
+    const statusDiv = document.getElementById('blocked-dates-status');
+
+    if (!this.config.blockedDates[dateStr]) {
+      statusDiv.innerHTML = '❌ Date not found';
+      statusDiv.style.color = '#f44336';
+      setTimeout(() => { statusDiv.innerHTML = ''; }, 3000);
+      return;
+    }
+
+    // Remove from config
+    delete this.config.blockedDates[dateStr];
+
+    // Update UI
+    this.renderBlockedDatesList();
+
+    // Show success message
+    statusDiv.innerHTML = '✅ Date unblocked successfully!';
+    statusDiv.style.color = '#4CAF50';
+    setTimeout(() => { statusDiv.innerHTML = ''; }, 3000);
+  }
+
+  // Format date for display
+  formatDateForDisplay(dateStr) {
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+  }
+
+  // Check if a date is blocked
+  isDateBlocked(dateStr) {
+    return this.config.blockedDates && this.config.blockedDates[dateStr];
+  }
+
+  // Get all blocked dates
+  getBlockedDates() {
+    return Object.keys(this.config.blockedDates || {});
   }
 }
 

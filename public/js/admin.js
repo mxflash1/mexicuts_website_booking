@@ -1,7 +1,9 @@
 document.addEventListener("DOMContentLoaded", async function () {
   // Initialize Firebase with secure configuration
   let firebaseConfig = null;
-  let db = null;
+  
+  // Make db global so other scripts can access it
+  window.db = null;
 
   try {
     // Load Firebase configuration securely
@@ -9,7 +11,7 @@ document.addEventListener("DOMContentLoaded", async function () {
     
     // Initialize Firebase
     firebase.initializeApp(firebaseConfig);
-    db = firebase.firestore();
+    window.db = firebase.firestore();
     
     console.log('✅ Firebase initialized successfully in admin panel');
   } catch (error) {
@@ -56,8 +58,11 @@ document.addEventListener("DOMContentLoaded", async function () {
   }
 
   // Initialize availability management
-  const adminAvailability = new AdminAvailabilityManager(db);
+  const adminAvailability = new AdminAvailabilityManager(window.db);
   await adminAvailability.loadConfig();
+  
+  // Make adminAvailability globally available for blocked dates functions
+  window.adminAvailability = adminAvailability;
   
   // Generate and insert the availability form
   const formContainer = document.getElementById('availability-form');
@@ -65,6 +70,9 @@ document.addEventListener("DOMContentLoaded", async function () {
   
   // Set up event listeners
   adminAvailability.setupEventListeners();
+  
+  // Initialize blocked dates management
+  adminAvailability.initializeBlockedDates();
 
   const calendarEl = document.getElementById("calendar");
   const events = [];
@@ -76,7 +84,8 @@ document.addEventListener("DOMContentLoaded", async function () {
 
     const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     const today = new Date();
-    const startOfWeek = new Date(today.setDate(today.getDate() - today.getDay()));
+    const startOfWeek = new Date(today);
+    startOfWeek.setDate(today.getDate() - today.getDay());
     
     for (let i = 0; i < 14; i++) { // Show 2 weeks
       const currentDate = new Date(startOfWeek);
@@ -84,10 +93,26 @@ document.addEventListener("DOMContentLoaded", async function () {
       
       const dayName = days[currentDate.getDay()];
       const dayConfig = availabilityManager.config.businessHours[dayName];
+      // Use local date formatting instead of UTC to avoid timezone issues
+      const year = currentDate.getFullYear();
+      const month = String(currentDate.getMonth() + 1).padStart(2, '0');
+      const day = String(currentDate.getDate()).padStart(2, '0');
+      const dateStr = `${year}-${month}-${day}`;
       
-      if (dayConfig && dayConfig.enabled) {
+      // Check if this date is blocked
+      const isBlocked = availabilityManager.isDateBlocked(dateStr);
+      
+      if (isBlocked) {
+        // Add blocked date as background event
+        events.push({
+          start: `${dateStr}T00:00:00`,
+          end: `${dateStr}T23:59:59`,
+          display: 'background',
+          color: '#4a1a1a', // Dark red for blocked dates
+          title: `Blocked: ${isBlocked.reason || 'No reason provided'}`
+        });
+      } else if (dayConfig && dayConfig.enabled) {
         // Add open hours as background events
-        const dateStr = currentDate.toISOString().split('T')[0];
         const startTime = `${dateStr}T${dayConfig.startTime}:00`;
         const endTime = `${dateStr}T${dayConfig.endTime}:00`;
         
@@ -103,7 +128,7 @@ document.addEventListener("DOMContentLoaded", async function () {
   }
 
   // Load bookings and create events
-  db.collection("bookings").get().then(snapshot => {
+  window.db.collection("bookings").get().then(snapshot => {
     snapshot.forEach(doc => {
       const data = doc.data();
 
@@ -212,7 +237,7 @@ document.addEventListener("DOMContentLoaded", async function () {
       };
       
       try {
-        await db.collection("bookings").doc(bookingId).update(updatedData);
+        await window.db.collection("bookings").doc(bookingId).update(updatedData);
         showStatusMessage("✅ Booking updated successfully!", "success");
         modal.style.display = "none";
         setTimeout(() => location.reload(), 1000); // Refresh after showing success
@@ -231,7 +256,7 @@ document.addEventListener("DOMContentLoaded", async function () {
   // Delete booking function
   async function deleteBooking(bookingId) {
     try {
-      await db.collection("bookings").doc(bookingId).delete();
+      await window.db.collection("bookings").doc(bookingId).delete();
       showStatusMessage("✅ Booking deleted successfully!", "success");
       document.getElementById("bookingModal").style.display = "none";
       setTimeout(() => location.reload(), 1000); // Refresh after showing success
