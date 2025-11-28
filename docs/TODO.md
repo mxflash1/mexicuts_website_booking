@@ -67,7 +67,7 @@
   - [X] Block out specific dates in advance
   - [X] Clean out this file
   - [X] commit to github
-  - [ ] add auto sheets (with cash or card)
+  - [X] add auto sheets (with cash or card)
   - [ ] add a message that confirms a clients cancellation to the CLIENT
   - [ ] change so that when client logs in, past appointments are no longer recorded and only upcoming appointments are shown and only these are able to be counted towards the leaderboard
 

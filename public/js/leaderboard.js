@@ -126,13 +126,13 @@ function formatWeeks(weeks) {
 // Display skeleton/placeholder leaderboard
 function displaySkeletonLeaderboard(container) {
   let html = `
-    <div style="max-width: 800px; margin: 0 auto;">
-      <h2 style="color: #CE1126; text-align: center; margin-bottom: 10px; font-size: 2rem;">🏆 Most Loyal Customers</h2>
-      <p style="text-align: center; color: #ccc; margin-bottom: 30px; font-size: 0.9rem;">
+    <div style="max-width: 800px; margin: 0 auto; padding: 0 10px;">
+      <h2 style="color: #CE1126; text-align: center; margin-bottom: 8px; font-size: clamp(1rem, 4vw, 1.8rem); line-height: 1.4;">🏆 Most Loyal Customers</h2>
+      <p style="text-align: center; color: #ccc; margin-bottom: 20px; font-size: clamp(0.7rem, 2.5vw, 0.9rem); font-family: 'VT323', monospace; line-height: 1.5;">
         Ranked by how frequently they come in for haircuts
       </p>
 
-      <div style="display: flex; flex-direction: column; gap: 15px;">
+      <div style="display: flex; flex-direction: column; gap: 12px;">
   `;
 
   // Create 10 placeholder entries
@@ -154,19 +154,20 @@ function displaySkeletonLeaderboard(container) {
       <div style="
         background: ${bgColor};
         border: 2px solid ${borderColor};
-        border-radius: 12px;
-        padding: 20px;
+        border-radius: 10px;
+        padding: 15px;
         display: flex;
+        flex-wrap: wrap;
         align-items: center;
-        gap: 20px;
+        gap: 12px;
         opacity: 0.5;
       ">
         
         <!-- Rank Badge -->
         <div style="
-          font-size: 2rem;
+          font-size: clamp(1.3rem, 5vw, 2rem);
           font-weight: bold;
-          min-width: 60px;
+          min-width: 45px;
           text-align: center;
           color: ${rank <= 3 ? borderColor : '#CE1126'};
         ">
@@ -174,11 +175,11 @@ function displaySkeletonLeaderboard(container) {
         </div>
 
         <!-- Placeholder Info -->
-        <div style="flex: 1;">
-          <div style="font-size: 1.2rem; font-weight: bold; color: #666; margin-bottom: 5px;">
+        <div style="flex: 1; min-width: 120px;">
+          <div style="font-size: clamp(0.8rem, 3vw, 1rem); font-weight: bold; color: #666; margin-bottom: 4px;">
             ${rank === 1 ? 'Be the first!' : 'Available spot'}
           </div>
-          <div style="font-size: 0.85rem; color: #555;">
+          <div style="font-size: clamp(0.6rem, 2.5vw, 0.75rem); color: #555; font-family: 'VT323', monospace;">
             ${rank === 1 ? 'Come in regularly to claim the top spot!' : 'Keep coming back to earn this position'}
           </div>
         </div>
@@ -186,16 +187,17 @@ function displaySkeletonLeaderboard(container) {
         <!-- Frequency Placeholder -->
         <div style="
           text-align: center;
-          padding: 15px 20px;
+          padding: 10px 12px;
           background: rgba(0, 104, 71, 0.1);
           border: 2px solid #444;
           border-radius: 8px;
-          min-width: 120px;
+          min-width: 80px;
+          flex-shrink: 0;
         ">
-          <div style="font-size: 1.5rem; font-weight: bold; color: #666;">
+          <div style="font-size: clamp(1rem, 4vw, 1.3rem); font-weight: bold; color: #666; font-family: 'VT323', monospace;">
             ---
           </div>
-          <div style="font-size: 0.75rem; color: #555; margin-top: 5px;">
+          <div style="font-size: clamp(0.55rem, 2vw, 0.7rem); color: #555; margin-top: 3px; font-family: 'VT323', monospace;">
             avg frequency
           </div>
         </div>
@@ -209,20 +211,19 @@ function displaySkeletonLeaderboard(container) {
 
       <!-- Explanation -->
       <div style="
-        margin-top: 30px;
-        padding: 20px;
+        margin-top: 20px;
+        padding: 15px;
         background: #2a2a2a;
         border: 1px solid #555;
         border-radius: 8px;
         text-align: center;
       ">
-        <p style="color: #ccc; font-size: 0.85rem; line-height: 1.6;">
-          💡 <strong>How it works:</strong> Customers are ranked by how frequently they come in for haircuts.<br>
-          The lower the average time between visits, the higher they rank!<br>
-          <span style="color: #999; font-size: 0.8rem;">Create an account and come back regularly to appear on the leaderboard!</span>
+        <p style="color: #ccc; font-size: clamp(0.65rem, 2.5vw, 0.8rem); line-height: 1.5; font-family: 'VT323', monospace; margin: 0 0 10px 0;">
+          💡 <strong>How it works:</strong> Customers are ranked by how frequently they come in for haircuts.
+          The lower the average time between visits, the higher they rank!
         </p>
-        <div style="margin-top: 15px; padding: 15px; background: rgba(206, 17, 38, 0.1); border: 1px solid #CE1126; border-radius: 6px;">
-          <p style="color: #CE1126; font-size: 0.9rem; margin: 0;">
+        <div style="padding: 12px; background: rgba(206, 17, 38, 0.1); border: 1px solid #CE1126; border-radius: 6px;">
+          <p style="color: #CE1126; font-size: clamp(0.6rem, 2.5vw, 0.8rem); margin: 0; font-family: 'VT323', monospace;">
             🎯 <strong>Requirements:</strong> You need at least 2 completed haircuts to appear on the leaderboard
           </p>
         </div>
@@ -242,10 +243,13 @@ async function displayLeaderboard() {
     return;
   }
 
+  // Check if mobile
+  const isMobile = window.innerWidth <= 600;
+
   // Show loading state
   leaderboardContainer.innerHTML = `
     <div style="text-align: center; padding: 40px; color: #ccc;">
-      <p style="font-size: 18px;">🏆 Loading leaderboard...</p>
+      <p style="font-size: 16px; font-family: 'VT323', monospace;">🏆 Loading leaderboard...</p>
     </div>
   `;
 
@@ -261,15 +265,15 @@ async function displayLeaderboard() {
   // Take top 10
   const top10 = leaderboardData.slice(0, 10);
 
-  // Build HTML
+  // Build HTML with mobile-responsive styles
   let html = `
-    <div style="max-width: 800px; margin: 0 auto;">
-      <h2 style="color: #CE1126; text-align: center; margin-bottom: 10px; font-size: 2rem;">🏆 Most Loyal Customers</h2>
-      <p style="text-align: center; color: #ccc; margin-bottom: 30px; font-size: 0.9rem;">
+    <div style="max-width: 800px; margin: 0 auto; padding: 0 10px;">
+      <h2 style="color: #CE1126; text-align: center; margin-bottom: 8px; font-size: clamp(1rem, 4vw, 1.8rem); line-height: 1.4;">🏆 Most Loyal Customers</h2>
+      <p style="text-align: center; color: #ccc; margin-bottom: 20px; font-size: clamp(0.7rem, 2.5vw, 0.9rem); font-family: 'VT323', monospace; line-height: 1.5;">
         Ranked by how frequently they come in for haircuts
       </p>
 
-      <div style="display: flex; flex-direction: column; gap: 15px;">
+      <div style="display: flex; flex-direction: column; gap: 12px;">
   `;
 
   top10.forEach((customer, index) => {
@@ -288,19 +292,19 @@ async function displayLeaderboard() {
       <div style="
         background: ${bgColor};
         border: 2px solid ${borderColor};
-        border-radius: 12px;
-        padding: 20px;
+        border-radius: 10px;
+        padding: 15px;
         display: flex;
+        flex-wrap: wrap;
         align-items: center;
-        gap: 20px;
-        transition: transform 0.2s;
-      " onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'">
+        gap: 12px;
+      ">
         
         <!-- Rank Badge -->
         <div style="
-          font-size: 2rem;
+          font-size: clamp(1.3rem, 5vw, 2rem);
           font-weight: bold;
-          min-width: 60px;
+          min-width: 45px;
           text-align: center;
           color: ${rank <= 3 ? borderColor : '#CE1126'};
         ">
@@ -308,29 +312,30 @@ async function displayLeaderboard() {
         </div>
 
         <!-- Customer Info -->
-        <div style="flex: 1;">
-          <div style="font-size: 1.2rem; font-weight: bold; color: white; margin-bottom: 5px;">
+        <div style="flex: 1; min-width: 120px;">
+          <div style="font-size: clamp(0.85rem, 3.5vw, 1.1rem); font-weight: bold; color: white; margin-bottom: 4px; word-break: break-word;">
             ${customer.name}
           </div>
-          <div style="font-size: 0.85rem; color: #999; display: flex; gap: 15px; flex-wrap: wrap;">
+          <div style="font-size: clamp(0.65rem, 2.5vw, 0.8rem); color: #999; display: flex; flex-wrap: wrap; gap: 8px; font-family: 'VT323', monospace;">
             <span>📊 ${customer.totalVisits} visit${customer.totalVisits !== 1 ? 's' : ''}</span>
-            <span>📅 Last: ${lastVisitText}</span>
+            <span>📅 ${lastVisitText}</span>
           </div>
         </div>
 
         <!-- Frequency Score -->
         <div style="
           text-align: center;
-          padding: 15px 20px;
+          padding: 10px 12px;
           background: rgba(0, 104, 71, 0.2);
           border: 2px solid #006847;
           border-radius: 8px;
-          min-width: 120px;
+          min-width: 80px;
+          flex-shrink: 0;
         ">
-          <div style="font-size: 1.5rem; font-weight: bold; color: #4CAF50;">
+          <div style="font-size: clamp(1rem, 4vw, 1.3rem); font-weight: bold; color: #4CAF50; font-family: 'VT323', monospace;">
             ${formatWeeks(customer.averageWeeks)}
           </div>
-          <div style="font-size: 0.75rem; color: #999; margin-top: 5px;">
+          <div style="font-size: clamp(0.55rem, 2vw, 0.7rem); color: #999; margin-top: 3px; font-family: 'VT323', monospace;">
             avg frequency
           </div>
         </div>
@@ -344,17 +349,16 @@ async function displayLeaderboard() {
 
       <!-- Explanation -->
       <div style="
-        margin-top: 30px;
-        padding: 20px;
+        margin-top: 20px;
+        padding: 15px;
         background: #2a2a2a;
         border: 1px solid #555;
         border-radius: 8px;
         text-align: center;
       ">
-        <p style="color: #ccc; font-size: 0.85rem; line-height: 1.6;">
-          💡 <strong>How it works:</strong> Customers are ranked by how frequently they come in for haircuts.<br>
-          The lower the average time between visits, the higher they rank!<br>
-          <span style="color: #999; font-size: 0.8rem;">Updated in real-time as bookings are completed</span>
+        <p style="color: #ccc; font-size: clamp(0.65rem, 2.5vw, 0.8rem); line-height: 1.5; font-family: 'VT323', monospace; margin: 0;">
+          💡 <strong>How it works:</strong> Customers are ranked by how frequently they come in for haircuts.
+          The lower the average time between visits, the higher they rank!
         </p>
       </div>
     </div>

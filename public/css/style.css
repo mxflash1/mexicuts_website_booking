@@ -26,12 +26,25 @@ nav ul {
   list-style: none;
   display: flex;
   gap: 20px;
+  align-items: center;
+  margin: 0;
+  padding: 0;
+}
+
+nav ul li {
+  display: flex;
+  align-items: center;
+  margin: 0;
+  padding: 0;
 }
 
 nav a {
   color: #fff;
   text-decoration: none;
   transition: color 0.3s;
+  display: flex;
+  align-items: center;
+  line-height: 1;
 }
 
 nav a:hover {
@@ -40,7 +53,8 @@ nav a:hover {
 
 .hero {
   position: relative;
-  height: 70vh;
+  height: 100vh;
+  min-height: 600px;
   overflow: hidden;
   display: flex;
   align-items: center;
@@ -232,71 +246,138 @@ footer {
     text-decoration: underline;
   }
   
-  .nav-logo {
-    height: 100px;
-    margin-right: auto;
-    margin-left: 10px;
-    cursor: pointer;
-  }
-  
-  @media (max-width: 768px) {
-    .nav-logo {
-      display: none;
-    }
-  }
-  
-  #calendar {
-    max-width: 900px;
-    margin: 40px auto;
-    background: #111;
-    padding: 20px;
-    border-radius: 8px;
-  }
+.nav-logo {
+  height: 100px;
+  margin-right: auto;
+  margin-left: 10px;
+  cursor: pointer;
+}
+
+#calendar {
+  max-width: 900px;
+  margin: 40px auto;
+  background: #111;
+  padding: 20px;
+  border-radius: 8px;
+}
+
 /* Modal styling */
 .modal {
+  display: none;
+  position: fixed;
+  z-index: 999;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  background-color: rgba(0,0,0,0.85);
+  font-family: 'VT323', monospace;
+}
+
+.modal-content {
+  background-color: #111;
+  color: #fff;
+  margin: 10% auto;
+  padding: 30px;
+  border: 2px solid #CE1126;
+  width: 80%;
+  max-width: 500px;
+  border-radius: 6px;
+  text-align: left;
+}
+
+.modal-text {
+  white-space: pre-wrap;
+  font-size: 18px;
+  color: #00ffcc;
+}
+
+.close-button {
+  color: #fff;
+  float: right;
+  font-size: 24px;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+/* ==========================================
+   MOBILE RESPONSIVE STYLES
+   ========================================== */
+
+@media (max-width: 768px) {
+  /* Hide nav logo on mobile */
+  .nav-logo {
     display: none;
-    position: fixed;
-    z-index: 999;
-    left: 0;
-    top: 0;
-    width: 100%;
-    height: 100%;
-    overflow: auto;
-    background-color: rgba(0,0,0,0.85);
-    font-family: 'VT323', monospace;
-  }
-  
-  .modal-content {
-    background-color: #111;
-    color: #fff;
-    margin: 10% auto;
-    padding: 30px;
-    border: 2px solid #CE1126;
-    width: 80%;
-    max-width: 500px;
-    border-radius: 6px;
-    text-align: left;
-  }
-  
-  .modal-text {
-    white-space: pre-wrap;
-    font-size: 18px;
-    color: #00ffcc;
-  }
-  
-  .close-button {
-    color: #fff;
-    float: right;
-    font-size: 24px;
-    font-weight: bold;
-    cursor: pointer;
   }
 
+  /* Mobile Header & Navigation */
+  header {
+    padding: 15px 10px;
+    justify-content: center;
+  }
 
+  nav ul {
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px 15px;
+    padding: 0;
+    margin: 0;
+  }
 
-  /* Mobile booking form styling */
+  nav ul li {
+    font-size: 11px;
+  }
+
+  nav a {
+    font-size: 11px;
+    padding: 5px 8px;
+    display: block;
+  }
+
+  /* Mobile Hero Section */
+  .hero {
+    height: 100vh;
+    min-height: 500px;
+    padding: 30px 15px;
+  }
+
+  .hero-text {
+    padding: 15px;
+  }
+
+  .hero-text p {
+    font-size: 0.9rem;
+    line-height: 1.6;
+  }
+
+  .center-logo {
+    max-width: 250px;
+  }
+
+  .cta {
+    padding: 12px 25px;
+    font-size: 0.85rem;
+  }
+
+  /* Mobile Sections */
+  section {
+    padding: 30px 15px;
+  }
+
+  h2 {
+    font-size: 1.2rem;
+    line-height: 1.5;
+  }
+
+  /* Mobile Booking Section */
   #booking {
     padding: 20px 15px !important;
+  }
+
+  #booking p {
+    font-size: 0.8rem;
+    line-height: 1.8;
   }
 
   #bookingForm {
@@ -309,7 +390,7 @@ footer {
     width: 100% !important;
     box-sizing: border-box !important;
     margin-bottom: 15px !important;
-    font-size: 16px !important; /* Prevents zoom on iOS */
+    font-size: 16px !important;
     padding: 15px !important;
     border-radius: 8px !important;
   }
@@ -354,6 +435,48 @@ footer {
     height: 40px !important;
     line-height: 40px !important;
     max-width: 40px !important;
+  }
+
+  /* Mobile Footer */
+  footer {
+    font-size: 0.75rem;
+    padding: 20px 15px;
+  }
+
+  footer p {
+    margin: 8px 0;
+  }
+
+  /* Mobile Popup Message */
+  #popupMessage {
+    width: 85%;
+    font-size: 0.9rem;
+    padding: 15px 20px;
+    text-align: center;
+  }
+}
+
+/* Extra small screens (under 400px) */
+@media (max-width: 400px) {
+  nav ul {
+    gap: 5px 10px;
+  }
+
+  nav a {
+    font-size: 10px;
+    padding: 4px 6px;
+  }
+
+  .hero-text p {
+    font-size: 0.8rem;
+  }
+
+  h2 {
+    font-size: 1rem;
+  }
+
+  #booking p {
+    font-size: 0.7rem;
   }
 }
     
