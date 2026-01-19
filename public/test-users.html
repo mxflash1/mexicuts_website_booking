@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>User Database Test</title>
+  <style>
+    body {
+      background: #1a1a1a;
+      color: white;
+      font-family: Arial, sans-serif;
+      padding: 40px;
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    .result {
+      background: #2a2a2a;
+      border: 2px solid #CE1126;
+      border-radius: 8px;
+      padding: 20px;
+      margin: 20px 0;
+    }
+    .success {
+      border-color: #4CAF50;
+    }
+    .error {
+      border-color: #f44336;
+    }
+    button {
+      background: #CE1126;
+      color: white;
+      border: none;
+      padding: 15px 30px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 16px;
+      font-weight: bold;
+      margin: 10px 5px;
+    }
+    button:hover {
+      background: #a00f1f;
+    }
+    pre {
+      background: #1a1a1a;
+      padding: 15px;
+      border-radius: 6px;
+      overflow-x: auto;
+      font-size: 14px;
+    }
+  </style>
+
+  <!-- Firebase -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
+</head>
+<body>
+  <h1>🔍 User Database Diagnostic Tool</h1>
+  <p>This tool checks if users are being saved to Firestore correctly.</p>
+
+  <button onclick="checkUsers()">🔍 Check Users in Database</button>
+  <button onclick="checkAuth()">🔐 Check Firebase Auth Users</button>
+  <button onclick="checkCurrentUser()">👤 Check Current Logged-In User</button>
+
+  <div id="results"></div>
+
+  <!-- Firebase configuration -->
+  <script src="js/firebase-env.js"></script>
+  <script src="js/firebase-config.js"></script>
+
+  <script>
+    let db = null;
+    let auth = null;
+
+    // Initialize Firebase
+    async function initFirebase() {
+      try {
+        const firebaseConfig = await window.firebaseConfigManager.loadConfig();
+        firebase.initializeApp(firebaseConfig);
+        db = firebase.firestore();
+        auth = firebase.auth();
+        
+        showResult('✅ Firebase initialized successfully', 'success');
+        return true;
+      } catch (error) {
+        showResult('❌ Firebase initialization failed: ' + error.message, 'error');
+        return false;
+      }
+    }
+
+    // Check users in Firestore
+    async function checkUsers() {
+      if (!db) {
+        await initFirebase();
+      }
+
+      showResult('🔍 Checking users collection in Firestore...', '');
+
+      try {
+        const usersSnapshot = await db.collection('users').get();
+        
+        if (usersSnapshot.empty) {
+          showResult(`
+            <h3>❌ No Users Found in Firestore</h3>
+            <p><strong>This means:</strong></p>
+            <ul>
+              <li>Users might be created in Firebase Auth but not saved to Firestore</li>
+              <li>OR no one has signed up yet</li>
+            </ul>
+            <p><strong>To fix:</strong></p>
+            <ol>
+              <li>Try signing up with a new account on the main website</li>
+              <li>Check browser console for errors during signup</li>
+              <li>Make sure Firestore rules allow writing to 'users' collection</li>
+            </ol>
+          `, 'error');
+        } else {
+          let userList = '<h3>✅ Users Found in Firestore</h3>';
+          userList += `<p><strong>Total Users: ${usersSnapshot.size}</strong></p>`;
+          userList += '<div style="margin-top: 20px;">';
+          
+          usersSnapshot.forEach(doc => {
+            const data = doc.data();
+            userList += `
+              <div style="background: #1a1a1a; padding: 15px; margin: 10px 0; border-radius: 6px;">
+                <strong>User ID:</strong> ${doc.id}<br>
+                <strong>Name:</strong> ${data.name || 'N/A'}<br>
+                <strong>Phone:</strong> ${data.phone || 'N/A'}<br>
+                <strong>Created:</strong> ${data.createdAt ? data.createdAt.toDate().toLocaleString() : 'N/A'}<br>
+                <strong>Booking Count:</strong> ${data.bookingCount || 0}
+              </div>
+            `;
+          });
+          
+          userList += '</div>';
+          showResult(userList, 'success');
+        }
+      } catch (error) {
+        showResult(`
+          <h3>❌ Error Reading Firestore</h3>
+          <p><strong>Error:</strong> ${error.message}</p>
+          <p><strong>Code:</strong> ${error.code || 'Unknown'}</p>
+          <p><strong>Possible causes:</strong></p>
+          <ul>
+            <li>Firestore rules might be blocking read access</li>
+            <li>Firebase configuration might be incorrect</li>
+            <li>Network connection issue</li>
+          </ul>
+        `, 'error');
+      }
+    }
+
+    // Check Firebase Auth users
+    async function checkAuth() {
+      if (!auth) {
+        await initFirebase();
+      }
+
+      showResult('🔐 Checking Firebase Authentication users...', '');
+
+      try {
+        const currentUser = auth.currentUser;
+        
+        if (currentUser) {
+          showResult(`
+            <h3>✅ You Are Logged In</h3>
+            <div style="background: #1a1a1a; padding: 15px; margin: 10px 0; border-radius: 6px;">
+              <strong>User ID:</strong> ${currentUser.uid}<br>
+              <strong>Email:</strong> ${currentUser.email}<br>
+              <strong>Created:</strong> ${currentUser.metadata.creationTime}
+            </div>
+            <p><strong>Note:</strong> To see all users, you need Firebase Admin SDK (server-side only)</p>
+          `, 'success');
+        } else {
+          showResult(`
+            <h3>⚠️ Not Logged In</h3>
+            <p>You're not currently logged in. Log in on the main website first.</p>
+          `, '');
+        }
+      } catch (error) {
+        showResult('❌ Error: ' + error.message, 'error');
+      }
+    }
+
+    // Check current user
+    async function checkCurrentUser() {
+      if (!auth) {
+        await initFirebase();
+      }
+
+      showResult('👤 Checking current user...', '');
+
+      const currentUser = auth.currentUser;
+      
+      if (!currentUser) {
+        showResult(`
+          <h3>⚠️ Not Logged In</h3>
+          <p>Please log in on the main website first, then come back here.</p>
+        `, '');
+        return;
+      }
+
+      try {
+        // Check if user exists in Firestore
+        const userDoc = await db.collection('users').doc(currentUser.uid).get();
+        
+        if (userDoc.exists) {
+          const data = userDoc.data();
+          showResult(`
+            <h3>✅ User Found in Both Auth and Firestore</h3>
+            <div style="background: #1a1a1a; padding: 15px; margin: 10px 0; border-radius: 6px;">
+              <strong>Auth User ID:</strong> ${currentUser.uid}<br>
+              <strong>Email (Phone):</strong> ${currentUser.email}<br>
+              <strong>Name:</strong> ${data.name}<br>
+              <strong>Phone:</strong> ${data.phone}<br>
+              <strong>Created:</strong> ${data.createdAt ? data.createdAt.toDate().toLocaleString() : 'N/A'}<br>
+              <strong>Booking Count:</strong> ${data.bookingCount || 0}
+            </div>
+            <p style="color: #4CAF50;"><strong>✅ Everything looks good! This user should show up on the admin page.</strong></p>
+          `, 'success');
+        } else {
+          showResult(`
+            <h3>⚠️ User in Auth but NOT in Firestore</h3>
+            <p><strong>This is the problem!</strong></p>
+            <p>Your account exists in Firebase Authentication but wasn't saved to Firestore.</p>
+            <p><strong>To fix:</strong></p>
+            <ol>
+              <li>Log out from the main website</li>
+              <li>Sign up again with a new phone number</li>
+              <li>Check browser console for errors during signup</li>
+            </ol>
+            <p><strong>OR manually create the Firestore document:</strong></p>
+            <button onclick="createFirestoreUser('${currentUser.uid}', '${currentUser.email}')">
+              🔧 Create Firestore Document Now
+            </button>
+          `, 'error');
+        }
+      } catch (error) {
+        showResult('❌ Error: ' + error.message, 'error');
+      }
+    }
+
+    // Create Firestore user document manually
+    async function createFirestoreUser(uid, email) {
+      const name = prompt('Enter your name:');
+      if (!name) return;
+
+      const phone = prompt('Enter your phone number (e.g., 0402098123):');
+      if (!phone) return;
+
+      try {
+        await db.collection('users').doc(uid).set({
+          name: name,
+          phone: phone,
+          createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+          bookingCount: 0
+        });
+
+        showResult(`
+          <h3>✅ User Document Created!</h3>
+          <p>Successfully created Firestore document for user ${uid}</p>
+          <p>Now check the admin page - this user should appear!</p>
+        `, 'success');
+      } catch (error) {
+        showResult('❌ Failed to create user: ' + error.message, 'error');
+      }
+    }
+
+    // Display result
+    function showResult(html, type) {
+      const resultsDiv = document.getElementById('results');
+      const resultClass = type ? `result ${type}` : 'result';
+      
+      const resultHTML = `
+        <div class="${resultClass}">
+          ${html}
+        </div>
+      `;
+      
+      resultsDiv.innerHTML = resultHTML + resultsDiv.innerHTML;
+    }
+
+    // Initialize on load
+    window.onload = () => {
+      initFirebase();
+    };
+
+    // Make functions global
+    window.checkUsers = checkUsers;
+    window.checkAuth = checkAuth;
+    window.checkCurrentUser = checkCurrentUser;
+    window.createFirestoreUser = createFirestoreUser;
+  </script>
+</body>
+</html>
+
