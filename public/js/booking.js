@@ -49,6 +49,40 @@ let timeSlotsMap = {}; // Will be populated from config
 
 let bookedSlots = [];
 
+function getFunctionsBaseUrl() {
+  // Public HTTPS functions endpoint
+  // Example: https://us-central1-mexicuts-booking.cloudfunctions.net/<functionName>
+  if (firebaseConfig && firebaseConfig.projectId) {
+    return `https://us-central1-${firebaseConfig.projectId}.cloudfunctions.net`;
+  }
+  return null;
+}
+
+async function createGuestBooking(data) {
+  const baseUrl = getFunctionsBaseUrl();
+  if (!baseUrl) throw new Error('Missing projectId for functions URL');
+
+  const res = await fetch(`${baseUrl}/createGuestBooking`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: data.name,
+      phone: data.phone,
+      timeSlot: data.timeSlot,
+      notes: data.notes || ''
+    })
+  });
+
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok || !payload.success) {
+    const message = payload && payload.message ? payload.message : 'Failed to create booking';
+    const err = new Error(message);
+    err.status = res.status;
+    throw err;
+  }
+  return payload;
+}
+
 // Initialize Firebase with secure configuration
 async function initializeFirebase() {
   try {
@@ -152,8 +186,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   form.insertBefore(slotContainer, notesField);
 
   // Fetch all booked slots once on load
-  db.collection("bookings").onSnapshot(snapshot => {
-    bookedSlots = snapshot.docs.map(doc => doc.data().timeSlot);
+  // IMPORTANT: Do not read the private `bookings` collection from the public website.
+  // We read from `bookedSlots` instead (contains only timeSlot, no PII).
+  db.collection("bookedSlots").onSnapshot(snapshot => {
+    bookedSlots = snapshot.docs.map(doc => doc.data().timeSlot).filter(Boolean);
   });
   
 
@@ -300,17 +336,19 @@ document.addEventListener("DOMContentLoaded", async () => {
       timestamp: new Date()
     };
 
-    // Add userId if user is logged in
-    if (authManager && authManager.isLoggedIn()) {
-      const currentUser = authManager.getCurrentUser();
-      if (currentUser) {
-        data.userId = currentUser.uid;
-        console.log('Adding userId to booking:', currentUser.uid);
-      }
-    }
-
     try {
-      await db.collection("bookings").add(data);
+      // If logged in, create booking directly (rules require userId match).
+      // If guest, create booking via Cloud Function (keeps bookings private + prevents public writes).
+      if (authManager && authManager.isLoggedIn()) {
+        const currentUser = authManager.getCurrentUser();
+        if (currentUser) {
+          data.userId = currentUser.uid;
+          console.log('Adding userId to booking:', currentUser.uid);
+        }
+        await db.collection("bookings").add(data);
+      } else {
+        await createGuestBooking(data);
+      }
       
       // Update user's booking count if logged in
       if (data.userId) {

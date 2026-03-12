@@ -85,6 +85,17 @@ function parseAppointmentTime(timeSlot) {
   }
 }
 
+function slotDocIdFromTimeSlot(timeSlot) {
+  // Deterministic doc id so a time slot can be locked uniquely.
+  // Firestore doc IDs allow most characters, but we keep it conservative.
+  return String(timeSlot || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '_')
+    .replace(/[^a-z0-9_:+-]/g, '_')
+    .slice(0, 200);
+}
+
 // Function to format date in readable format (e.g., "24, August, Wednesday")
 function formatReadableDate(timeSlot) {
   try {
@@ -230,6 +241,85 @@ async function deleteFromGoogleSheets(bookingId) {
   }
 }
 
+// Public endpoint: create a guest booking securely (no direct public writes to bookings).
+exports.createGuestBooking = onRequest(
+  {
+    region: 'us-central1',
+    invoker: 'public',
+    cors: true
+  },
+  async (req, res) => {
+    res.set('Access-Control-Allow-Origin', '*');
+    res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Content-Type');
+
+    if (req.method === 'OPTIONS') {
+      res.status(204).send('');
+      return;
+    }
+
+    if (req.method !== 'POST') {
+      res.status(405).send('Method not allowed');
+      return;
+    }
+
+    try {
+      const { name, phone, timeSlot, notes } = req.body || {};
+
+      if (!name || !phone || !timeSlot) {
+        res.status(400).json({ success: false, message: 'Missing required fields' });
+        return;
+      }
+
+      if (typeof name !== 'string' || typeof phone !== 'string' || typeof timeSlot !== 'string') {
+        res.status(400).json({ success: false, message: 'Invalid field types' });
+        return;
+      }
+
+      const slotId = slotDocIdFromTimeSlot(timeSlot);
+      if (!slotId) {
+        res.status(400).json({ success: false, message: 'Invalid time slot' });
+        return;
+      }
+
+      const db = admin.firestore();
+      const slotRef = db.collection('bookedSlots').doc(slotId);
+      const bookingRef = db.collection('bookings').doc(); // auto id
+
+      await db.runTransaction(async (tx) => {
+        const slotDoc = await tx.get(slotRef);
+        if (slotDoc.exists) {
+          throw new Error('SLOT_TAKEN');
+        }
+
+        tx.set(slotRef, {
+          timeSlot,
+          bookingId: bookingRef.id,
+          createdAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        tx.set(bookingRef, {
+          name: name.trim(),
+          phone: phone.trim(),
+          timeSlot: timeSlot.trim(),
+          notes: typeof notes === 'string' ? notes.trim() : '',
+          timestamp: admin.firestore.FieldValue.serverTimestamp(),
+          guest: true
+        });
+      });
+
+      res.json({ success: true, bookingId: bookingRef.id });
+    } catch (err) {
+      if (err && err.message === 'SLOT_TAKEN') {
+        res.status(409).json({ success: false, message: 'That time slot was just booked. Please choose another.' });
+        return;
+      }
+      console.error('❌ createGuestBooking error:', err);
+      res.status(500).json({ success: false, message: 'Failed to create booking' });
+    }
+  }
+);
+
 // This function triggers when a new user signs up (Gen 2)
 exports.sendNewUserNotification = onDocumentCreated(
   {
@@ -304,6 +394,27 @@ exports.sendBookingNotification = onDocumentCreated(
       const bookingData = event.data && event.data.data ? event.data.data() : {};
       const bookingId = event.data.id;
 
+      // Create/refresh public-safe slot document for availability UI
+      // (Contains no PII; only used to disable taken slots on the website.)
+      try {
+        if (bookingData && bookingData.timeSlot) {
+          const slotId = slotDocIdFromTimeSlot(bookingData.timeSlot);
+          await admin.firestore().collection('bookedSlots').doc(slotId).set(
+            {
+              timeSlot: bookingData.timeSlot,
+              bookingId: bookingId,
+              createdAt: admin.firestore.FieldValue.serverTimestamp()
+            },
+            { merge: true }
+          );
+          console.log('✅ bookedSlots updated for booking:', bookingId);
+        } else {
+          console.warn('⚠️ bookingData.timeSlot missing; skipping bookedSlots write for:', bookingId);
+        }
+      } catch (slotError) {
+        console.error('❌ Error writing bookedSlots (continuing with notifications):', slotError);
+      }
+
       // Send email notification to barber
       const transporter = createTransporter();
 
@@ -370,6 +481,17 @@ exports.deleteBookingNotification = onDocumentDeleted(
       const bookingId = event.data.id;
       const bookingData = event.data.data(); // Get the booking data before deletion
       console.log(`🗑️ Booking ${bookingId} was deleted from Firestore`);
+
+      // Remove public-safe slot document
+      try {
+        const slotId = bookingData && bookingData.timeSlot ? slotDocIdFromTimeSlot(bookingData.timeSlot) : null;
+        if (slotId) {
+          await admin.firestore().collection('bookedSlots').doc(slotId).delete();
+        }
+        console.log('✅ bookedSlots removed for booking:', bookingId);
+      } catch (slotDeleteError) {
+        console.error('❌ Error deleting bookedSlots (continuing):', slotDeleteError);
+      }
 
       // Delete from Google Sheets
       await deleteFromGoogleSheets(bookingId);
