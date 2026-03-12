@@ -60,8 +60,13 @@ class AvailabilityManager {
 
     const slots = [];
     const startTime = this.parseTime(dayConfig.startTime);
-    const endTime = this.parseTime(dayConfig.endTime);
+    let endTime = this.parseTime(dayConfig.endTime);
     const duration = dayConfig.slotDuration || 30;
+
+    // Handle midnight (00:00) as end time - treat it as 24:00 (1440 minutes)
+    if (endTime === 0 && dayConfig.endTime === '00:00') {
+      endTime = 1440; // 24 * 60 = 1440 minutes (midnight of next day)
+    }
 
     let currentTime = startTime;
     while (currentTime < endTime) {

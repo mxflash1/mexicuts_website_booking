@@ -197,3 +197,5 @@ The leaderboard frequency tracking system is now live! It will automatically tra
 
 Customers will be motivated to book more frequently to climb the leaderboard rankings! 🏆
 
+
+

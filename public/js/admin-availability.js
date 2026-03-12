@@ -235,21 +235,23 @@ class AdminAvailabilityManager {
   // Generate time options for dropdowns
   generateTimeOptions() {
     const times = [];
-    // Start from 5:00 AM (hour = 5) instead of 6:00 AM
-    for (let hour = 5; hour <= 22; hour++) {
+    // Start from 5:00 AM (hour = 5) and go to midnight (24:00 = 00:00)
+    for (let hour = 5; hour <= 23; hour++) {
       for (let minute = 0; minute < 60; minute += 30) {
         const timeStr = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
         times.push(timeStr);
       }
     }
+    // Add midnight as the final option
+    times.push('00:00');
     return times;
   }
 
   // Format time for display
   formatTimeForDisplay(timeStr) {
     const [hours, minutes] = timeStr.split(':').map(Number);
-    const period = hours >= 12 ? 'PM' : 'AM';
-    const displayHours = hours === 0 ? 12 : hours > 12 ? hours - 12 : hours;
+    const period = hours >= 12 && hours !== 24 ? 'PM' : 'AM';
+    const displayHours = hours === 0 || hours === 24 ? 12 : hours > 12 ? hours - 12 : hours;
     return `${displayHours}:${minutes.toString().padStart(2, '0')} ${period}`;
   }
 

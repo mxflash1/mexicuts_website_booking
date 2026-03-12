@@ -73,17 +73,10 @@ function parseAppointmentTime(timeSlot) {
       hour24 = 0;
     }
     
-    // Create date in Australian timezone (Brisbane)
-    // Note: JavaScript Date constructor interprets time as local time
-    const appointmentDate = new Date(
-      parseInt(year),
-      parseInt(month) - 1, // Month is 0-indexed
-      parseInt(day),
-      hour24,
-      parseInt(minute),
-      0, // seconds
-      0  // milliseconds
-    );
+    // Create date string in ISO format for Brisbane timezone (UTC+10)
+    // Cloud Functions run in UTC, so we need to explicitly handle Brisbane timezone
+    const dateString = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}T${String(hour24).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00+10:00`;
+    const appointmentDate = new Date(dateString);
     
     return appointmentDate;
   } catch (error) {
@@ -797,6 +790,12 @@ exports.processCompletedHaircuts = onSchedule(
         if (appointmentDate >= fortyFiveMinutesAgo && appointmentDate <= thirtyMinutesAgo) {
           console.log(`Processing completed haircut: ${booking.name} at ${booking.timeSlot}`);
           
+          // Skip if admin already confirmed payment
+          if (booking.adminConfirmed === true) {
+            console.log(`⏭️ Skipping email - admin already confirmed payment for ${booking.name}`);
+            continue;
+          }
+          
           // Add to Google Sheets
           const success = await addHaircutToPaymentSheet(booking, bookingId);
           
@@ -808,7 +807,7 @@ exports.processCompletedHaircuts = onSchedule(
               paymentStatus: 'pending' // pending, paid_cash, paid_card
             });
             
-            // Send email notification
+            // Send email notification (only if not admin confirmed)
             await sendPaymentReminderEmail(booking, bookingId);
             
             processedCount++;
@@ -1462,6 +1461,67 @@ exports.fixBookingCounts = onRequest(
       }
       
       res.send(`✅ Fixed booking counts for ${updatedCount} users:\n\n${results.join('\n')}`);
+      
+    } catch (error) {
+      console.error('❌ Error:', error);
+      res.status(500).send('Error: ' + error.message);
+    }
+  }
+);
+
+// HTTP endpoint to debug a specific booking
+exports.debugBooking = onRequest(
+  {
+    region: 'us-central1',
+    invoker: 'public',
+    cors: true
+  },
+  async (req, res) => {
+    res.set('Access-Control-Allow-Origin', '*');
+    res.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    
+    if (req.method === 'OPTIONS') {
+      res.status(204).send('');
+      return;
+    }
+    
+    try {
+      const bookingId = req.query.bookingId;
+      
+      if (!bookingId) {
+        res.status(400).send('Please provide bookingId parameter');
+        return;
+      }
+      
+      const doc = await admin.firestore().collection('bookings').doc(bookingId).get();
+      
+      if (!doc.exists) {
+        res.status(404).send('Booking not found');
+        return;
+      }
+      
+      const booking = doc.data();
+      const now = new Date();
+      const thirtyMinutesAgo = new Date(now.getTime() - 30 * 60 * 1000);
+      const fortyFiveMinutesAgo = new Date(now.getTime() - 45 * 60 * 1000);
+      
+      const appointmentDate = parseAppointmentTime(booking.timeSlot);
+      
+      const debug = {
+        bookingId: bookingId,
+        name: booking.name,
+        timeSlot: booking.timeSlot,
+        parsedDate: appointmentDate ? appointmentDate.toISOString() : 'FAILED TO PARSE',
+        currentTime: now.toISOString(),
+        thirtyMinutesAgo: thirtyMinutesAgo.toISOString(),
+        fortyFiveMinutesAgo: fortyFiveMinutesAgo.toISOString(),
+        isInWindow: appointmentDate ? (appointmentDate >= fortyFiveMinutesAgo && appointmentDate <= thirtyMinutesAgo) : false,
+        alreadyProcessed: !!booking.addedToPaymentSheet,
+        adminConfirmed: !!booking.adminConfirmed,
+        shouldProcess: appointmentDate && (appointmentDate >= fortyFiveMinutesAgo && appointmentDate <= thirtyMinutesAgo) && !booking.addedToPaymentSheet && !booking.adminConfirmed
+      };
+      
+      res.send(`<pre>${JSON.stringify(debug, null, 2)}</pre>`);
       
     } catch (error) {
       console.error('❌ Error:', error);

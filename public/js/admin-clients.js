@@ -262,12 +262,12 @@ function showClientModal(client, bookings) {
             <div>
               <div style="color: #999; font-size: 13px; margin-bottom: 5px;">📱 Phone</div>
               <div style="color: white; font-size: 16px; font-weight: bold;">${client.phone || 'N/A'}</div>
-            </div>
+          </div>
             <div>
               <div style="color: #999; font-size: 13px; margin-bottom: 5px;">📅 Joined</div>
               <div style="color: white; font-size: 16px; font-weight: bold;">${client.createdAt ? client.createdAt.toDate().toLocaleDateString('en-AU', { year: 'numeric', month: 'short', day: 'numeric' }) : 'Unknown'}</div>
-            </div>
-            <div>
+          </div>
+          <div>
               <div style="color: #999; font-size: 13px; margin-bottom: 5px;">📋 Total Bookings</div>
               <div style="color: #4CAF50; font-size: 20px; font-weight: bold;">${bookings.length}</div>
             </div>
@@ -282,7 +282,7 @@ function showClientModal(client, bookings) {
               <span style="background: #006847; color: white; font-size: 14px; padding: 2px 10px; border-radius: 12px;">${upcomingBookings.length}</span>
             </h3>
             ${upcomingBookings.map(booking => formatBooking(booking)).join('')}
-          </div>
+              </div>
         ` : ''}
 
         <!-- Past Appointments Section -->
