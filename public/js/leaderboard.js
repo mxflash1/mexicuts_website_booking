@@ -4,58 +4,38 @@
 
 console.log('🏆 Leaderboard.js loaded');
 
-// Calculate leaderboard data using frequency stats from user profiles
+// Calculate leaderboard data using public-safe leaderboard collection
 async function calculateLeaderboard() {
   try {
-    console.log('📊 Loading leaderboard from user frequency stats...');
+    console.log('📊 Loading leaderboard from public leaderboard collection...');
     
-    // Get all users
-    const usersSnapshot = await db.collection('users').get();
+    // Get precomputed leaderboard entries (top 100, ordered by position)
+    const snapshot = await db.collection('leaderboardPublic')
+      .orderBy('position')
+      .limit(100)
+      .get();
     
-    if (usersSnapshot.empty) {
-      console.log('No users found');
+    if (snapshot.empty) {
+      console.log('No leaderboard data found');
       return [];
     }
 
     const leaderboardData = [];
 
-    // For each user, use their pre-calculated frequency stats
-    for (const userDoc of usersSnapshot.docs) {
-      const userId = userDoc.id;
-      const userData = userDoc.data();
-
-      // Check if user has frequency stats
-      if (!userData.frequencyStats) {
-        console.log(`User ${userData.name} has no frequency stats yet`);
-        continue;
-      }
-
-      const stats = userData.frequencyStats;
-
-      // Need at least 2 completed bookings to appear on leaderboard
-      if (!stats.completedBookingsSinceFeb14 || stats.completedBookingsSinceFeb14 < 2) {
-        continue;
-      }
-
-      // Need valid average weeks calculation
-      if (!stats.averageWeeksBetween || stats.averageWeeksBetween === null) {
-        continue;
-      }
-
-      // Add to leaderboard
+    // Convert docs into the shape used by the UI
+    for (const doc of snapshot.docs) {
+      const data = doc.data();
+      const lastVisitTimestamp = data.lastVisit;
       leaderboardData.push({
-        userId: userId,
-        name: userData.name || 'Unknown',
-        phone: userData.phone || '',
-        totalVisits: stats.completedBookingsSinceFeb14,
-        averageWeeks: stats.averageWeeksBetween,
-        lastVisit: stats.lastBookingDate ? stats.lastBookingDate.toDate() : new Date(),
-        firstVisit: stats.firstBookingDate ? stats.firstBookingDate.toDate() : null
+        userId: doc.id,
+        name: data.displayName || 'Customer',
+        totalVisits: data.totalVisits || 0,
+        averageWeeks: data.averageWeeks || 0,
+        lastVisit: lastVisitTimestamp && lastVisitTimestamp.toDate ? lastVisitTimestamp.toDate() : new Date(),
+        // firstVisit not currently used in UI; keep for future if needed
+        firstVisit: null
       });
     }
-
-    // Sort by average weeks (lower is better - more frequent)
-    leaderboardData.sort((a, b) => a.averageWeeks - b.averageWeeks);
 
     console.log(`✅ Leaderboard loaded: ${leaderboardData.length} customers ranked`);
     return leaderboardData;

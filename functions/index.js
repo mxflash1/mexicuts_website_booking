@@ -5,7 +5,7 @@ const twilio = require('twilio');
 const { google } = require('googleapis');
 const { defineSecret } = require('firebase-functions/params');
 const { onRequest } = require('firebase-functions/v2/https');
-const { onDocumentCreated, onDocumentDeleted } = require('firebase-functions/v2/firestore');
+const { onDocumentCreated, onDocumentDeleted, onDocumentUpdated } = require('firebase-functions/v2/firestore');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 
 // Initialize Firebase Admin
@@ -241,6 +241,51 @@ async function deleteFromGoogleSheets(bookingId) {
   }
 }
 
+// Run actions that should only happen when a booking is APPROVED:
+// - Send SMS confirmation to client
+// - Backup booking to Google Sheets
+// - Mark notificationsSent: true to avoid duplicates
+async function handleBookingApproved(bookingData, bookingId) {
+  try {
+    if (!bookingData || !bookingData.phone || !bookingData.timeSlot) {
+      console.warn('handleBookingApproved called with incomplete bookingData for', bookingId);
+      return;
+    }
+
+    // Send SMS confirmation
+    try {
+      const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+
+      const formattedDate = formatReadableDate(bookingData.timeSlot);
+      // Extract time from timeSlot (format: "2025-08-23 05:30 PM")
+      const [, timePart, ampm] = bookingData.timeSlot.split(' ');
+      const time = `${timePart} ${ampm}`;
+      const smsMessage = `Mexi Cuts appointment confirmed\nDate: ${formattedDate}\nTime: ${time}\nService: Haircut ($20)\nLocation: 6 Rosella Tce, Peregian Springs\nMaps: https://maps.google.com/?q=6+Rosella+Tce,+Peregian+Springs,+Sunshine+Coast,+QLD,+Australia\nContact: 0402098123\nIG: @mexi_cuts\nArrive 5 min early. Cancel on the website. DO NOT REPLY`;
+
+      await client.messages.create({
+        body: smsMessage,
+        from: process.env.TWILIO_PHONE_NUMBER,
+        to: formatPhoneNumber(bookingData.phone)
+      });
+
+      console.log('✅ SMS confirmation sent to client successfully (on approval)');
+    } catch (smsError) {
+      console.error('❌ Error sending SMS on approval (continuing):', smsError.message);
+    }
+
+    // Backup to Google Sheets
+    await backupToGoogleSheets(bookingData, bookingId);
+
+    // Mark notifications as sent to prevent duplicates
+    await admin.firestore().collection('bookings').doc(bookingId).set(
+      { notificationsSent: true },
+      { merge: true }
+    );
+  } catch (error) {
+    console.error('❌ Error in handleBookingApproved:', error);
+  }
+}
+
 // Public endpoint: create a guest booking securely (no direct public writes to bookings).
 exports.createGuestBooking = onRequest(
   {
@@ -264,7 +309,7 @@ exports.createGuestBooking = onRequest(
     }
 
     try {
-      const { name, phone, timeSlot, notes } = req.body || {};
+      const { name, phone, timeSlot, notes, deviceId } = req.body || {};
 
       if (!name || !phone || !timeSlot) {
         res.status(400).json({ success: false, message: 'Missing required fields' });
@@ -282,7 +327,63 @@ exports.createGuestBooking = onRequest(
         return;
       }
 
+      // ── Three-layer rate limiting ────────────────────────────────────────
       const db = admin.firestore();
+      const TEN_MIN_MS = 10 * 60 * 1000;
+      const tenMinutesAgo = new Date(Date.now() - TEN_MIN_MS);
+
+      function rateLimitMsg(lastBookingDate) {
+        const remaining = Math.ceil((TEN_MIN_MS - (Date.now() - lastBookingDate.getTime())) / 60000);
+        const plural = remaining === 1 ? 'minute' : 'minutes';
+        return `⏳ Please wait ${remaining} more ${plural} before making another booking. To avoid this, delete your current booking.`;
+      }
+
+      // Extract caller IP (Cloud Run puts original IP in x-forwarded-for)
+      const rawIp = (req.headers['x-forwarded-for'] || req.ip || '').split(',')[0].trim();
+      const ipKey = rawIp ? 'ip_' + rawIp.replace(/[.:]/g, '_') : null;
+      const devKey = (deviceId && typeof deviceId === 'string' && deviceId.length > 0)
+        ? 'dev_' + deviceId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 100)
+        : null;
+
+      // Layer 1 (server): IP address check
+      if (ipKey) {
+        const ipDoc = await db.collection('rateLimits').doc(ipKey).get();
+        if (ipDoc.exists) {
+          const last = ipDoc.data().lastBooking;
+          if (last && last.toDate() > tenMinutesAgo) {
+            res.status(429).json({ success: false, message: rateLimitMsg(last.toDate()) });
+            return;
+          }
+        }
+      }
+
+      // Layer 2 (server): Device fingerprint check
+      if (devKey) {
+        const devDoc = await db.collection('rateLimits').doc(devKey).get();
+        if (devDoc.exists) {
+          const last = devDoc.data().lastBooking;
+          if (last && last.toDate() > tenMinutesAgo) {
+            res.status(429).json({ success: false, message: rateLimitMsg(last.toDate()) });
+            return;
+          }
+        }
+      }
+
+      // Layer 3 (server): Phone number check — find most recent booking to get exact countdown
+      const recentByPhone = await db.collection('bookings').where('phone', '==', phone.trim()).get();
+      const recentPhoneDocs = recentByPhone.docs.filter(doc => {
+        const ts = doc.data().timestamp;
+        return ts && ts.toDate() > tenMinutesAgo;
+      });
+      if (recentPhoneDocs.length > 0) {
+        const latestTs = recentPhoneDocs
+          .map(doc => doc.data().timestamp.toDate())
+          .sort((a, b) => b - a)[0];
+        res.status(429).json({ success: false, message: rateLimitMsg(latestTs) });
+        return;
+      }
+      // ─────────────────────────────────────────────────────────────────────
+
       const slotRef = db.collection('bookedSlots').doc(slotId);
       const bookingRef = db.collection('bookings').doc(); // auto id
 
@@ -304,9 +405,24 @@ exports.createGuestBooking = onRequest(
           timeSlot: timeSlot.trim(),
           notes: typeof notes === 'string' ? notes.trim() : '',
           timestamp: admin.firestore.FieldValue.serverTimestamp(),
-          guest: true
+          guest: true,
+          status: 'pending'
         });
       });
+
+      // Record this booking in rateLimits for future checks
+      const rlBatch = db.batch();
+      if (ipKey) {
+        rlBatch.set(db.collection('rateLimits').doc(ipKey), {
+          lastBooking: admin.firestore.FieldValue.serverTimestamp()
+        });
+      }
+      if (devKey) {
+        rlBatch.set(db.collection('rateLimits').doc(devKey), {
+          lastBooking: admin.firestore.FieldValue.serverTimestamp()
+        });
+      }
+      await rlBatch.commit();
 
       res.json({ success: true, bookingId: bookingRef.id });
     } catch (err) {
@@ -316,6 +432,132 @@ exports.createGuestBooking = onRequest(
       }
       console.error('❌ createGuestBooking error:', err);
       res.status(500).json({ success: false, message: 'Failed to create booking' });
+    }
+  }
+);
+
+// Public endpoint: look up bookings by phone number (for guest self-service cancellation).
+// Returns only future/active bookings for the provided phone — no admin data exposed.
+exports.lookupBookingByPhone = onRequest(
+  {
+    region: 'us-central1',
+    invoker: 'public',
+    cors: true
+  },
+  async (req, res) => {
+    res.set('Access-Control-Allow-Origin', '*');
+    res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Content-Type');
+
+    if (req.method === 'OPTIONS') {
+      res.status(204).send('');
+      return;
+    }
+
+    if (req.method !== 'POST') {
+      res.status(405).json({ success: false, message: 'Method not allowed' });
+      return;
+    }
+
+    try {
+      const { phone } = req.body || {};
+      if (!phone || typeof phone !== 'string') {
+        res.status(400).json({ success: false, message: 'Missing phone number' });
+        return;
+      }
+
+      const db = admin.firestore();
+      const phoneTrimmed = phone.trim();
+
+      // Try both the provided number and the formatted +61 version
+      const cleaned = phoneTrimmed.replace(/\D/g, '');
+      const formatted = cleaned.startsWith('0') && cleaned.length === 10
+        ? '+61' + cleaned.substring(1)
+        : phoneTrimmed;
+
+      let snapshot = await db.collection('bookings').where('phone', '==', phoneTrimmed).get();
+      if (snapshot.empty && formatted !== phoneTrimmed) {
+        snapshot = await db.collection('bookings').where('phone', '==', formatted).get();
+      }
+
+      if (snapshot.empty) {
+        res.json({ success: true, bookings: [] });
+        return;
+      }
+
+      // Only return safe fields — no internal IDs beyond bookingId, no userId
+      const bookings = snapshot.docs.map(doc => ({
+        bookingId: doc.id,
+        name: doc.data().name || '',
+        timeSlot: doc.data().timeSlot || '',
+        notes: doc.data().notes || '',
+        phone: doc.data().phone || ''
+      }));
+
+      res.json({ success: true, bookings });
+    } catch (err) {
+      console.error('❌ lookupBookingByPhone error:', err);
+      res.status(500).json({ success: false, message: 'Failed to look up booking' });
+    }
+  }
+);
+
+// Public endpoint: cancel a booking by phone number verification.
+// Caller must provide the bookingId AND the matching phone number — prevents
+// random cancellation of other people's bookings.
+exports.cancelGuestBooking = onRequest(
+  {
+    region: 'us-central1',
+    invoker: 'public',
+    cors: true
+  },
+  async (req, res) => {
+    res.set('Access-Control-Allow-Origin', '*');
+    res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Content-Type');
+
+    if (req.method === 'OPTIONS') {
+      res.status(204).send('');
+      return;
+    }
+
+    if (req.method !== 'POST') {
+      res.status(405).json({ success: false, message: 'Method not allowed' });
+      return;
+    }
+
+    try {
+      const { bookingId, phone } = req.body || {};
+
+      if (!bookingId || !phone) {
+        res.status(400).json({ success: false, message: 'Missing bookingId or phone' });
+        return;
+      }
+
+      const db = admin.firestore();
+      const bookingRef = db.collection('bookings').doc(bookingId);
+      const bookingDoc = await bookingRef.get();
+
+      if (!bookingDoc.exists) {
+        res.status(404).json({ success: false, message: 'Booking not found' });
+        return;
+      }
+
+      const bookingData = bookingDoc.data();
+
+      // Verify the provided phone matches the booking — prevents cancelling others' bookings
+      const normalise = p => (p || '').replace(/\D/g, '').replace(/^61/, '0');
+      if (normalise(bookingData.phone) !== normalise(phone)) {
+        res.status(403).json({ success: false, message: 'Phone number does not match this booking' });
+        return;
+      }
+
+      await bookingRef.delete();
+
+      res.json({ success: true });
+    } catch (err) {
+      console.error('❌ cancelGuestBooking error:', err);
+      res.status(500).json({ success: false, message: 'Failed to cancel booking' });
     }
   }
 );
@@ -415,53 +657,36 @@ exports.sendBookingNotification = onDocumentCreated(
         console.error('❌ Error writing bookedSlots (continuing with notifications):', slotError);
       }
 
-      // Send email notification to barber
+      // Send email notification to barber (always on create, regardless of status)
       const transporter = createTransporter();
 
       const mailOptions = {
         from: process.env.GMAIL_USER,
         to: 'matias.oliverac@outlook.com',
-        subject: '🎉 New Booking at Mexi Cuts! 🎉',
+        subject: '🆕 New Booking Pending Approval - Mexi Cuts',
         html: `
-          <h2>New Booking Received!</h2>
+          <h2>New Booking Received (Pending Approval)</h2>
           <p><strong>Customer Name:</strong> ${bookingData.name || ''}</p>
           <p><strong>Phone Number:</strong> ${bookingData.phone || ''}</p>
           <p><strong>Appointment Time:</strong> ${bookingData.timeSlot || ''}</p>
           <p><strong>Special Notes:</strong> ${bookingData.notes || 'None'}</p>
           <p><strong>Booking Date:</strong> ${bookingData.timestamp ? new Date(bookingData.timestamp.toDate()).toLocaleString() : ''}</p>
           <br>
-          <p>This booking has been automatically saved to your database and backed up to Google Sheets.</p>
+          <p>Status: <strong>${(bookingData.status || 'pending').toUpperCase()}</strong></p>
+          <p>This booking is currently <strong>pending</strong>. Please review it in your admin panel to accept or reject it.</p>
+          <p>SMS confirmation and Google Sheets backup will only be triggered <strong>after you accept</strong> the booking.</p>
         `
       };
 
       await transporter.sendMail(mailOptions);
-      console.log('✅ Booking notification email sent successfully');
+      console.log('✅ Booking notification email (pending) sent successfully');
 
-      // Send SMS confirmation to client
-      if (bookingData.phone) {
-        try {
-          const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-          
-          const formattedDate = formatReadableDate(bookingData.timeSlot);
-          // Extract time from timeSlot (format: "2025-08-23 05:30 PM")
-          const [, timePart, ampm] = bookingData.timeSlot.split(' ');
-          const time = `${timePart} ${ampm}`;
-          const smsMessage = `Mexi Cuts appointment confirmed\nDate: ${formattedDate}\nTime: ${time}\nService: Haircut ($20)\nLocation: 6 Rosella Tce, Peregian Springs\nMaps: https://maps.google.com/?q=6+Rosella+Tce,+Peregian+Springs,+Sunshine+Coast,+QLD,+Australia\nContact: 0402098123\nIG: @mexi_cuts\nArrive 5 min early. Cancel on the website. DO NOT REPLY`;
-
-          await client.messages.create({
-            body: smsMessage,
-            from: process.env.TWILIO_PHONE_NUMBER, // Use purchased Twilio phone number
-            to: formatPhoneNumber(bookingData.phone) // Format phone number for international SMS
-          });
-          
-          console.log('✅ SMS confirmation sent to client successfully');
-        } catch (smsError) {
-          console.error('❌ Error sending SMS (continuing with other notifications):', smsError.message);
-        }
+      // If this booking is already approved on create (e.g. manual admin booking),
+      // run the approved actions immediately.
+      const statusOnCreate = bookingData.status || 'pending';
+      if (statusOnCreate === 'approved' && !bookingData.notificationsSent) {
+        await handleBookingApproved(bookingData, bookingId);
       }
-
-      // Backup to Google Sheets
-      await backupToGoogleSheets(bookingData, bookingId);
 
     } catch (error) {
       console.error('❌ Error sending notifications:', error);
@@ -504,6 +729,98 @@ exports.deleteBookingNotification = onDocumentDeleted(
       console.log(`✅ Successfully processed deletion of booking ${bookingId}`);
     } catch (error) {
       console.error('❌ Error processing booking deletion:', error);
+    }
+  }
+);
+
+// Trigger when a booking is updated; if status changes from non-approved to approved,
+// send SMS + Google Sheets backup once.
+exports.handleBookingStatusChange = onDocumentUpdated(
+  {
+    region: 'us-central1',
+    document: 'bookings/{bookingId}',
+    secrets: [TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER, GOOGLE_SHEETS_CREDENTIALS, GOOGLE_SHEET_ID]
+  },
+  async (event) => {
+    try {
+      const beforeData = event.data && event.data.before && event.data.before.data ? event.data.before.data() : null;
+      const afterData = event.data && event.data.after && event.data.after.data ? event.data.after.data() : null;
+      const bookingId = event.params.bookingId;
+
+      if (!beforeData || !afterData) {
+        return;
+      }
+
+      const previousStatus = beforeData.status || 'pending';
+      const newStatus = afterData.status || 'pending';
+
+      // Only react when transitioning into approved
+      if (previousStatus === 'approved' || newStatus !== 'approved') {
+        return;
+      }
+
+      if (afterData.notificationsSent) {
+        console.log('Notifications already sent for booking', bookingId);
+        return;
+      }
+
+      console.log(`✅ Booking ${bookingId} status changed from ${previousStatus} to approved. Running approved actions.`);
+      await handleBookingApproved(afterData, bookingId);
+    } catch (error) {
+      console.error('❌ Error handling booking status change:', error);
+    }
+  }
+);
+
+// HTTP endpoint to rebuild bookedSlots collection from existing bookings.
+// Useful after changing how availability is tracked so old bookings still block slots.
+exports.rebuildBookedSlots = onRequest(
+  {
+    region: 'us-central1',
+    invoker: 'public',
+    cors: true
+  },
+  async (req, res) => {
+    res.set('Access-Control-Allow-Origin', '*');
+    res.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Content-Type');
+
+    if (req.method === 'OPTIONS') {
+      res.status(204).send('');
+      return;
+    }
+
+    try {
+      const db = admin.firestore();
+      const bookingsSnapshot = await db.collection('bookings').get();
+
+      if (bookingsSnapshot.empty) {
+        res.send('No bookings found to rebuild bookedSlots.');
+        return;
+      }
+
+      let written = 0;
+      const batch = db.batch();
+
+      bookingsSnapshot.forEach(doc => {
+        const data = doc.data();
+        if (!data.timeSlot) return;
+
+        const slotId = slotDocIdFromTimeSlot(data.timeSlot);
+        const ref = db.collection('bookedSlots').doc(slotId);
+        batch.set(ref, {
+          timeSlot: data.timeSlot,
+          bookingId: doc.id,
+          createdAt: admin.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+        written++;
+      });
+
+      await batch.commit();
+      res.send(`✅ Rebuilt bookedSlots for ${written} booking(s).`);
+    } catch (error) {
+      console.error('❌ Error rebuilding bookedSlots:', error);
+      res.status(500).send('Error rebuilding bookedSlots: ' + error.message);
     }
   }
 );
@@ -1253,8 +1570,8 @@ exports.updateUserFrequencyStats = onSchedule(
       const FEB_14_2026 = new Date('2026-02-14T00:00:00+10:00'); // Feb 14, 2026 Brisbane time
       const now = new Date();
       
-      // Get all users
-      const usersSnapshot = await admin.firestore().collection('users').get();
+      const db = admin.firestore();
+      const usersSnapshot = await db.collection('users').get();
       
       if (usersSnapshot.empty) {
         console.log('No users found');
@@ -1262,6 +1579,7 @@ exports.updateUserFrequencyStats = onSchedule(
       }
       
       let updatedCount = 0;
+      const leaderboardEntries = [];
       
       for (const userDoc of usersSnapshot.docs) {
         const userId = userDoc.id;
@@ -1337,15 +1655,52 @@ exports.updateUserFrequencyStats = onSchedule(
         }
         
         // Update user document with frequency stats
-        await admin.firestore().collection('users').doc(userId).update({
+        await db.collection('users').doc(userId).update({
           frequencyStats: stats
         });
         
         updatedCount++;
         console.log(`✅ Updated stats for ${userData.name}: ${stats.completedBookingsSinceFeb14} completed bookings, avg ${stats.averageWeeksBetween ? stats.averageWeeksBetween.toFixed(1) : 'N/A'} weeks`);
+
+        // Build leaderboard entry (no phone numbers; only if they qualify)
+        if (stats.completedBookingsSinceFeb14 >= 2 && stats.averageWeeksBetween !== null) {
+          leaderboardEntries.push({
+            userId,
+            displayName: userData.name || 'Customer',
+            totalVisits: stats.completedBookingsSinceFeb14,
+            averageWeeks: stats.averageWeeksBetween,
+            lastVisit: stats.lastBookingDate || null
+          });
+        }
       }
       
-      console.log(`✅ Frequency stats update complete: ${updatedCount} users updated`);
+      // Sort leaderboard by average weeks (lower is more frequent)
+      leaderboardEntries.sort((a, b) => a.averageWeeks - b.averageWeeks);
+      
+      // Write public-safe leaderboard collection
+      const leaderboardRef = db.collection('leaderboardPublic');
+      const existing = await leaderboardRef.get();
+      const batch = db.batch();
+      
+      // Clear old entries
+      existing.forEach(doc => batch.delete(doc.ref));
+      
+      // Limit to top 100 for safety
+      leaderboardEntries.slice(0, 100).forEach((entry, index) => {
+        const ref = leaderboardRef.doc(entry.userId);
+        batch.set(ref, {
+          displayName: entry.displayName,
+          totalVisits: entry.totalVisits,
+          averageWeeks: entry.averageWeeks,
+          lastVisit: entry.lastVisit,
+          position: index + 1,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+      });
+      
+      await batch.commit();
+      
+      console.log(`✅ Frequency stats update complete: ${updatedCount} users updated, leaderboardPublic size: ${Math.min(leaderboardEntries.length, 100)}`);
       
     } catch (error) {
       console.error('❌ Error updating user frequency stats:', error);
@@ -1447,6 +1802,175 @@ exports.fixMissingUserDocuments = onRequest(
     } catch (error) {
       console.error('❌ Error:', error);
       res.status(500).send('Error: ' + error.message);
+    }
+  }
+);
+
+// HTTP endpoint to promote the barber owner account to admin (custom claim).
+// Only the specific owner account (0402098123@mexicuts.local) is allowed.
+exports.promoteSelfToAdmin = onRequest(
+  {
+    region: 'us-central1',
+    invoker: 'public',
+    cors: true
+  },
+  async (req, res) => {
+    res.set('Access-Control-Allow-Origin', '*');
+    res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+    if (req.method === 'OPTIONS') {
+      res.status(204).send('');
+      return;
+    }
+
+    if (req.method !== 'POST') {
+      res.status(405).send('Method not allowed');
+      return;
+    }
+
+    try {
+      const idToken = (req.body && req.body.idToken) || '';
+      if (!idToken) {
+        res.status(400).json({ success: false, message: 'Missing idToken' });
+        return;
+      }
+
+      const decoded = await admin.auth().verifyIdToken(idToken);
+      const uid = decoded.uid;
+      const email = decoded.email || '';
+
+      const OWNER_EMAIL = '0402098123@mexicuts.local';
+
+      if (email !== OWNER_EMAIL) {
+        console.warn('promoteSelfToAdmin called by non-owner account:', email);
+        res.status(403).json({ success: false, isAdmin: false, message: 'Not authorized' });
+        return;
+      }
+
+      const userRecord = await admin.auth().getUser(uid);
+      const existingClaims = userRecord.customClaims || {};
+
+      if (!existingClaims.admin) {
+        existingClaims.admin = true;
+        await admin.auth().setCustomUserClaims(uid, existingClaims);
+        console.log(`✅ Set admin custom claim for owner uid=${uid}`);
+      } else {
+        console.log(`ℹ️ Owner uid=${uid} already has admin claim`);
+      }
+
+      // Mark in Firestore user profile as admin (optional, for UI/debug).
+      await admin.firestore().collection('users').doc(uid).set(
+        {
+          isAdmin: true
+        },
+        { merge: true }
+      );
+
+      res.json({ success: true, isAdmin: true });
+    } catch (error) {
+      console.error('❌ Error in promoteSelfToAdmin:', error);
+      res.status(500).json({ success: false, isAdmin: false, message: 'Internal error' });
+    }
+  }
+);
+
+// HTTP endpoint to delete a user completely (admin only).
+// - Requires an idToken from a user with custom claim admin: true
+// - Unlinks that user's bookings (removes userId field)
+// - Deletes Firestore user document
+// - Deletes leaderboardPublic entry
+// - Deletes Firebase Auth user
+exports.deleteUserCompletely = onRequest(
+  {
+    region: 'us-central1',
+    invoker: 'public',
+    cors: true
+  },
+  async (req, res) => {
+    res.set('Access-Control-Allow-Origin', '*');
+    res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+    if (req.method === 'OPTIONS') {
+      res.status(204).send('');
+      return;
+    }
+
+    if (req.method !== 'POST') {
+      res.status(405).send('Method not allowed');
+      return;
+    }
+
+    try {
+      const { idToken, userId } = req.body || {};
+      if (!idToken || !userId) {
+        res.status(400).json({ success: false, message: 'Missing idToken or userId' });
+        return;
+      }
+
+      const decoded = await admin.auth().verifyIdToken(idToken);
+      if (!decoded.admin) {
+        console.warn('deleteUserCompletely called by non-admin uid:', decoded.uid);
+        res.status(403).json({ success: false, message: 'Not authorized' });
+        return;
+      }
+
+      const db = admin.firestore();
+      const result = {
+        unlinkedBookings: 0,
+        userDocDeleted: false,
+        leaderboardEntryDeleted: false,
+        authUserDeleted: false
+      };
+
+      // Unlink bookings (remove userId field)
+      const bookingsSnapshot = await db.collection('bookings')
+        .where('userId', '==', userId)
+        .get();
+
+      if (!bookingsSnapshot.empty) {
+        const batch = db.batch();
+        bookingsSnapshot.forEach(doc => {
+          batch.update(doc.ref, {
+            userId: admin.firestore.FieldValue.delete()
+          });
+          result.unlinkedBookings++;
+        });
+        await batch.commit();
+      }
+
+      // Delete Firestore user document
+      try {
+        await db.collection('users').doc(userId).delete();
+        result.userDocDeleted = true;
+      } catch (e) {
+        console.error('Error deleting Firestore user doc:', e);
+      }
+
+      // Delete leaderboardPublic entry
+      try {
+        await db.collection('leaderboardPublic').doc(userId).delete();
+        result.leaderboardEntryDeleted = true;
+      } catch (e) {
+        console.error('Error deleting leaderboardPublic entry:', e);
+      }
+
+      // Delete Firebase Auth user
+      try {
+        await admin.auth().deleteUser(userId);
+        result.authUserDeleted = true;
+      } catch (e) {
+        console.error('Error deleting Auth user:', e);
+      }
+
+      res.json({
+        success: true,
+        ...result
+      });
+    } catch (error) {
+      console.error('❌ Error in deleteUserCompletely:', error);
+      res.status(500).json({ success: false, message: 'Internal error' });
     }
   }
 );
@@ -1674,8 +2198,8 @@ exports.updateFrequencyStatsNow = onRequest(
       const FEB_14_2026 = new Date('2026-02-14T00:00:00+10:00');
       const now = new Date();
       
-      // Get all users
-      const usersSnapshot = await admin.firestore().collection('users').get();
+      const db = admin.firestore();
+      const usersSnapshot = await db.collection('users').get();
       
       if (usersSnapshot.empty) {
         res.send('No users found in database');
@@ -1684,6 +2208,7 @@ exports.updateFrequencyStatsNow = onRequest(
       
       let updatedCount = 0;
       const results = [];
+      const leaderboardEntries = [];
       
       for (const userDoc of usersSnapshot.docs) {
         const userId = userDoc.id;
@@ -1695,7 +2220,7 @@ exports.updateFrequencyStatsNow = onRequest(
           .get();
         
         if (bookingsSnapshot.empty) {
-          await admin.firestore().collection('users').doc(userId).update({
+          await db.collection('users').doc(userId).update({
             frequencyStats: {
               bookingsSinceFeb14: 0,
               completedBookingsSinceFeb14: 0,
@@ -1753,15 +2278,44 @@ exports.updateFrequencyStatsNow = onRequest(
           }
         }
         
-        await admin.firestore().collection('users').doc(userId).update({
+        await db.collection('users').doc(userId).update({
           frequencyStats: stats
         });
         
         updatedCount++;
         results.push(`${userData.name}: ${stats.completedBookingsSinceFeb14} bookings, avg ${stats.averageWeeksBetween ? stats.averageWeeksBetween.toFixed(1) + ' weeks' : 'N/A'}`);
+
+        if (stats.completedBookingsSinceFeb14 >= 2 && stats.averageWeeksBetween !== null) {
+          leaderboardEntries.push({
+            userId,
+            displayName: userData.name || 'Customer',
+            totalVisits: stats.completedBookingsSinceFeb14,
+            averageWeeks: stats.averageWeeksBetween,
+            lastVisit: stats.lastBookingDate || null
+          });
+        }
       }
       
-      res.send(`✅ Updated ${updatedCount} users:\n\n${results.join('\n')}`);
+      // Sort and write leaderboardPublic immediately for manual refresh
+      leaderboardEntries.sort((a, b) => a.averageWeeks - b.averageWeeks);
+      const leaderboardRef = db.collection('leaderboardPublic');
+      const existing = await leaderboardRef.get();
+      const batch = db.batch();
+      existing.forEach(doc => batch.delete(doc.ref));
+      leaderboardEntries.slice(0, 100).forEach((entry, index) => {
+        const ref = leaderboardRef.doc(entry.userId);
+        batch.set(ref, {
+          displayName: entry.displayName,
+          totalVisits: entry.totalVisits,
+          averageWeeks: entry.averageWeeks,
+          lastVisit: entry.lastVisit,
+          position: index + 1,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+      });
+      await batch.commit();
+      
+      res.send(`✅ Updated ${updatedCount} users and wrote ${Math.min(leaderboardEntries.length, 100)} leaderboard entries:\n\n${results.join('\n')}`);
       
     } catch (error) {
       console.error('❌ Error:', error);

@@ -10,11 +10,10 @@ service cloud.firestore {
       return isSignedIn() && request.auth.token.admin == true;
     }
     
-    // Users collection
+    // Users collection (private, per-user)
     match /users/{userId} {
-      // Public can read basic user data (used for leaderboard).
-      // Writes are still restricted to the user/admin.
-      allow read: if true;
+      // Users can read/update their own profile; admins can manage all.
+      allow read: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
       allow create: if isSignedIn() && request.auth.uid == userId;
       allow update, delete: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
     }
@@ -41,12 +40,24 @@ service cloud.firestore {
       // Only admins can edit/delete bookings (keeps integrity simple).
       allow update, delete: if isAdmin();
     }
+
+    // Public leaderboard data (no phone numbers or raw user docs)
+    match /leaderboardPublic/{entryId} {
+      allow read: if true;
+      allow write: if false;
+    }
     
     // Settings collection - anyone can read and write (for admin panel)
     // In production, you'd want to restrict write access to admin users only
     match /settings/{document=**} {
       allow read: if true;
       allow write: if isAdmin();
+    }
+
+    // Rate limit records - written by Cloud Functions (admin SDK) only.
+    // Public clients must never read or write these directly.
+    match /rateLimits/{doc} {
+      allow read, write: if false;
     }
   }
 }

@@ -270,8 +270,55 @@
   <!-- Firebase -->
   <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
 </head>
 <body>
+
+  <!-- Admin Login Overlay -->
+  <div id="adminLoginOverlay" style="
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.9);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 3000;
+    ">
+    <div style="
+        background: #1a1a1a;
+        border-radius: 12px;
+        border: 2px solid #CE1126;
+        padding: 30px 24px;
+        width: 90%;
+        max-width: 400px;
+        box-shadow: 0 0 30px rgba(0,0,0,0.7);
+      ">
+      <h2 style="color:#CE1126; text-align:center; margin-bottom:16px;">Mexi Cuts Admin Login</h2>
+      <p style="color:#ccc; font-size:14px; text-align:center; margin-bottom:20px;">
+        Enter your admin phone number and password to access the calendar and client tools.
+      </p>
+      <form id="adminLoginForm" style="display:flex; flex-direction:column; gap:12px;">
+        <div>
+          <label for="adminPhone" style="display:block; color:#ccc; font-size:14px; margin-bottom:4px;">📱 Phone</label>
+          <input id="adminPhone" type="tel" placeholder="0402098123" required
+                 style="width:100%; padding:12px; border-radius:6px; border:1px solid #555; background:#333; color:white; font-size:16px;">
+        </div>
+        <div>
+          <label for="adminPassword" style="display:block; color:#ccc; font-size:14px; margin-bottom:4px;">🔒 Password</label>
+          <input id="adminPassword" type="password" placeholder="Password" required
+                 style="width:100%; padding:12px; border-radius:6px; border:1px solid #555; background:#333; color:white; font-size:16px;">
+        </div>
+        <div id="adminLoginError" style="display:none; background:#4a1a1a; border:1px solid #f44336; color:#f44336; padding:8px 10px; border-radius:6px; font-size:13px;"></div>
+        <button type="submit"
+                style="margin-top:8px; background:#CE1126; color:white; border:none; padding:12px 16px; border-radius:8px; font-size:16px; font-weight:bold; cursor:pointer;">
+          Log In as Admin
+        </button>
+      </form>
+      <p style="color:#777; font-size:11px; text-align:center; margin-top:12px;">
+        Only the barber owner account is allowed admin access.
+      </p>
+    </div>
+  </div>
 
   <!-- Header -->
   <div class="admin-header">
@@ -287,6 +334,29 @@
         <button id="addManualBookingBtn" class="btn btn-secondary">➕ Add Manual Booking</button>
       </div>
       <div id="calendar"></div>
+    </div>
+  </div>
+
+  <div id="pending-tab" class="tab-content">
+    <div class="content-box">
+      <h3>⏳ Pending</h3>
+      <p style="color:#ccc; margin-bottom: 20px; font-size: 14px;">Review and approve or reject new bookings and clients.</p>
+      <div style="display:flex; flex-wrap:wrap; gap:20px;">
+        <div style="flex:1; min-width:260px;">
+          <h4 style="color:#CE1126; margin-bottom:8px;">Pending Bookings</h4>
+          <p style="color:#777; font-size:12px; margin-bottom:8px;">
+            New bookings appear here first. Accept to confirm and send SMS, or reject/delete to clear spam.
+          </p>
+          <div id="pendingBookingsList"></div>
+        </div>
+        <div style="flex:1; min-width:260px;">
+          <h4 style="color:#006847; margin-bottom:8px;">Pending Clients</h4>
+          <p style="color:#777; font-size:12px; margin-bottom:8px;">
+            New signups appear here before being added to your client base.
+          </p>
+          <div id="pendingClientsList"></div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -394,6 +464,10 @@
       <span class="nav-icon">📅</span>
       Calendar
     </button>
+    <button class="nav-item" onclick="switchTab('pending')">
+      <span class="nav-icon">⏳</span>
+      Pending
+    </button>
     <button class="nav-item" onclick="switchTab('hours')">
       <span class="nav-icon">⏰</span>
       Hours
@@ -448,10 +522,18 @@
         <input type="tel" id="editPhone" placeholder="Phone Number" required style="padding: 12px; border: 1px solid #555; border-radius: 6px; background: #1a1a1a; color: white;">
         <input type="text" id="editTimeSlot" placeholder="2025-08-23 2:00 PM" required style="padding: 12px; border: 1px solid #555; border-radius: 6px; background: #1a1a1a; color: white;">
         <textarea id="editNotes" rows="3" placeholder="Notes" style="padding: 12px; border: 1px solid #555; border-radius: 6px; background: #1a1a1a; color: white;"></textarea>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px;">
+          <span style="color:#ccc; font-size:13px;">Status:</span>
+          <span id="bookingStatusLabel" style="font-weight:bold; font-size:13px; color:#FFC107;">PENDING</span>
+        </div>
         
         <div style="display: flex; gap: 10px;">
           <button type="submit" class="btn" style="flex: 1;">💾 Update</button>
           <button type="button" id="deleteBooking" class="btn" style="flex: 1; background: #f44336;">🗑️ Delete</button>
+        </div>
+        <div style="display:flex; gap:10px; margin-top:5px;">
+          <button type="button" id="approveBookingBtn" class="btn-secondary" style="flex:1; border:none;">✅ Accept</button>
+          <button type="button" id="rejectBookingBtn" class="btn" style="flex:1; background:#555;">❌ Reject (keep record)</button>
         </div>
       </form>
     </div>
@@ -533,6 +615,7 @@
   <!-- Firebase configuration -->
   <script src="js/firebase-env.js"></script>
   <script src="js/firebase-config.js"></script>
+  <script src="js/admin-auth.js"></script>
   <script src="js/availability-utils.js"></script>
   <script src="js/admin-availability.js"></script>
   <script src="js/admin.js"></script>
@@ -557,6 +640,16 @@
 
       // Add active to clicked nav item
       event.target.closest('.nav-item').classList.add('active');
+
+      // Lazy-load pending data when opening Pending tab
+      if (tabName === 'pending') {
+        if (window.loadPendingBookings) {
+          window.loadPendingBookings();
+        }
+        if (window.loadPendingClients) {
+          window.loadPendingClients();
+        }
+      }
     }
   </script>
 

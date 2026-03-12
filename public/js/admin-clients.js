@@ -92,11 +92,18 @@ function displayClients(clients) {
     const isNew = client.createdAt && 
       (new Date() - client.createdAt.toDate()) < (7 * 24 * 60 * 60 * 1000);
 
+    const status = client.accountStatus || 'approved';
+    const statusColor = status === 'approved' ? '#4CAF50' :
+                        status === 'rejected' ? '#f44336' : '#FFC107';
+
     html += `
       <div class="client-card">
         <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 10px;">
           <h4>${client.name || 'Unknown'} ${isNew ? '<span style="background: #006847; color: white; font-size: 10px; padding: 2px 8px; border-radius: 12px; margin-left: 8px;">NEW</span>' : ''}</h4>
           <div style="display: flex; gap: 8px;">
+            <span style="align-self:center; padding:3px 8px; border-radius:999px; border:1px solid ${statusColor}; color:${statusColor}; font-size:11px; font-weight:bold;">
+              ${status.toUpperCase()}
+            </span>
             <button onclick="editClient('${client.id}')" 
                     style="background: #006847; color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px;">
               ✏️ Edit
@@ -105,10 +112,18 @@ function displayClients(clients) {
                   style="background: #555; color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px;">
               👁️ View
             </button>
+            <button onclick="approveClient('${client.id}')" 
+                    style="background: #4CAF50; color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px;">
+              ✅ Approve
+            </button>
+            <button onclick="rejectClient('${client.id}')" 
+                    style="background: #f44336; color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px;">
+              ❌ Reject
+            </button>
             <button onclick="deleteClient('${client.id}', '${client.name || 'Unknown'}')" 
                     style="background: #CE1126; color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px;">
               🗑️ Delete
-          </button>
+            </button>
           </div>
         </div>
         <div class="client-info">📱 ${client.phone || 'No phone'}</div>
@@ -366,6 +381,72 @@ document.addEventListener('DOMContentLoaded', () => {
   setTimeout(checkDatabase, 500);
 });
 
+// Load only pending clients for Pending tab
+async function loadPendingClients() {
+  const container = document.getElementById('pendingClientsList');
+  if (!container || !window.db) return;
+
+  try {
+    const snapshot = await window.db.collection('users')
+      .where('accountStatus', '==', 'pending')
+      .get();
+
+    if (snapshot.empty) {
+      container.innerHTML = `
+        <p style="text-align:center; color:#999; padding:10px;">
+          No pending clients right now.
+        </p>
+      `;
+      return;
+    }
+
+    let html = '';
+    snapshot.forEach(doc => {
+      const client = { id: doc.id, ...doc.data() };
+      const joinDate = client.createdAt ?
+        client.createdAt.toDate().toLocaleDateString('en-AU', {
+          year: 'numeric',
+          month: 'short',
+          day: 'numeric'
+        }) :
+        'Unknown';
+
+      html += `
+        <div class="client-card">
+          <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:10px;">
+            <h4>${client.name || 'Unknown'}</h4>
+            <div style="display:flex; gap:6px;">
+              <button onclick="approveClient('${client.id}')" 
+                      style="background:#4CAF50; color:white; border:none; padding:4px 8px; border-radius:6px; font-size:11px; cursor:pointer;">
+                ✅ Approve
+              </button>
+              <button onclick="rejectClient('${client.id}')" 
+                      style="background:#f0ad4e; color:white; border:none; padding:4px 8px; border-radius:6px; font-size:11px; cursor:pointer;">
+                ❌ Reject
+              </button>
+              <button onclick="deleteClient('${client.id}', '${client.name || 'Unknown'}')" 
+                      style="background:#CE1126; color:white; border:none; padding:4px 8px; border-radius:6px; font-size:11px; cursor:pointer;">
+                🗑️ Delete
+              </button>
+            </div>
+          </div>
+          <div class="client-info">📱 ${client.phone || 'No phone'}</div>
+          <div class="client-info">📅 Joined: ${joinDate}</div>
+        </div>
+      `;
+    });
+
+    container.innerHTML = html;
+  } catch (error) {
+    console.error('Error loading pending clients:', error);
+    container.innerHTML = `
+      <p style="text-align:center; color:#f44336; padding:10px;">
+        Error loading pending clients.
+      </p>
+    `;
+  }
+}
+
 // Edit client function
 async function editClient(clientId) {
   try {
@@ -487,7 +568,8 @@ async function deleteClient(clientId, clientName) {
     `⚠️ Are you sure you want to delete ${clientName}?\n\n` +
     `This will:\n` +
     `• Delete their user account from Firestore\n` +
-    `• Remove their Firebase Authentication account\n` +
+    `• Delete their Firebase Authentication account\n` +
+    `• Remove them from the public leaderboard\n` +
     `• Keep their bookings (but unlink them from the user)\n\n` +
     `This action CANNOT be undone!`
   );
@@ -497,38 +579,38 @@ async function deleteClient(clientId, clientName) {
   }
 
   try {
-    // Get user's bookings to unlink them
-    const bookingsSnapshot = await window.db.collection('bookings')
-      .where('userId', '==', clientId)
-      .get();
+    const auth = firebase.auth();
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      alert('❌ You must be logged in as admin to delete clients.');
+      return;
+    }
 
-    // Unlink bookings from user (remove userId field)
-    const unlinkPromises = [];
-    bookingsSnapshot.forEach(doc => {
-      unlinkPromises.push(
-        window.db.collection('bookings').doc(doc.id).update({
-          userId: firebase.firestore.FieldValue.delete()
-        })
-      );
+    const idToken = await currentUser.getIdToken(true);
+    const response = await fetch('https://us-central1-mexicuts-booking.cloudfunctions.net/deleteUserCompletely', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        idToken,
+        userId: clientId
+      })
     });
 
-    await Promise.all(unlinkPromises);
-    console.log(`✅ Unlinked ${bookingsSnapshot.size} booking(s)`);
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.success) {
+      console.error('Error from deleteUserCompletely:', data);
+      alert('❌ Error deleting client: ' + (data.message || 'Unknown error'));
+      return;
+    }
 
-    // Delete user document from Firestore
-    await window.db.collection('users').doc(clientId).delete();
-    console.log('✅ User document deleted from Firestore');
-
-    // Note: We can't delete from Firebase Auth from client-side
-    // That requires Firebase Admin SDK (server-side)
-    
     alert(
       `✅ Client deleted successfully!\n\n` +
-      `• Removed from database\n` +
-      `• ${bookingsSnapshot.size} booking(s) unlinked\n\n` +
-      `⚠️ Note: Their Firebase Auth account still exists.\n` +
-      `They won't be able to see their bookings anymore,\n` +
-      `but they can still log in and create a new account.`
+      `• Unlinked ${data.unlinkedBookings || 0} booking(s)\n` +
+      `• User profile removed\n` +
+      `• Auth account removed\n` +
+      `• Leaderboard entry removed`
     );
 
     // Reload clients list
@@ -540,10 +622,40 @@ async function deleteClient(clientId, clientName) {
   }
 }
 
+// Approve / reject client account (status only, no emails)
+async function approveClient(clientId) {
+  try {
+    await window.db.collection('users').doc(clientId).update({
+      accountStatus: 'approved'
+    });
+    alert('✅ Client approved');
+    loadClients();
+  } catch (error) {
+    console.error('Error approving client:', error);
+    alert('❌ Error approving client: ' + error.message);
+  }
+}
+
+async function rejectClient(clientId) {
+  try {
+    await window.db.collection('users').doc(clientId).update({
+      accountStatus: 'rejected'
+    });
+    alert('✅ Client rejected');
+    loadClients();
+  } catch (error) {
+    console.error('Error rejecting client:', error);
+    alert('❌ Error rejecting client: ' + error.message);
+  }
+}
+
 // Export functions
 window.viewClientDetails = viewClientDetails;
 window.closeClientModal = closeClientModal;
 window.editClient = editClient;
 window.closeEditClientModal = closeEditClientModal;
 window.deleteClient = deleteClient;
+window.approveClient = approveClient;
+window.rejectClient = rejectClient;
+window.loadPendingClients = loadPendingClients;
 

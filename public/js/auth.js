@@ -152,7 +152,8 @@ class AuthManager {
         phone: formattedPhone,
         name: name,
         createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-        bookingCount: 0
+        bookingCount: 0,
+        accountStatus: 'pending'
       });
       
       console.log('✅ User profile created in Firestore');

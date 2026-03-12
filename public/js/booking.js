@@ -8,6 +8,39 @@ let authManager = null;
 
 
 
+// ── Rate limiting helpers ──────────────────────────────────────────────────
+// Generates (or retrieves) a persistent random device ID stored in localStorage.
+// This is sent with every booking so the server can enforce per-device limits.
+function getOrCreateDeviceId() {
+  let id = localStorage.getItem('mexicuts_device_id');
+  if (!id) {
+    id = 'dev_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now().toString(36);
+    localStorage.setItem('mexicuts_device_id', id);
+  }
+  return id;
+}
+
+// Records the timestamp of the last successful booking on this device.
+function recordBookingTimestamp() {
+  localStorage.setItem('mexicuts_last_booking', new Date().toISOString());
+}
+
+// Returns true (and shows a message) if this device booked within the last 10 minutes.
+function isRateLimitedLocally() {
+  const ts = localStorage.getItem('mexicuts_last_booking');
+  if (!ts) return false;
+  const elapsed = Date.now() - new Date(ts).getTime();
+  const TEN_MIN = 10 * 60 * 1000;
+  if (elapsed < TEN_MIN) {
+    const minsLeft = Math.ceil((TEN_MIN - elapsed) / 60000);
+    const plural = minsLeft === 1 ? 'minute' : 'minutes';
+    showPopup(`⏳ Please wait ${minsLeft} more ${plural} before making another booking. To avoid this, delete your current booking.`);
+    return true;
+  }
+  return false;
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 function showPopup(message) {
   let popup = document.getElementById("popupMessage");
   if (!popup) {
@@ -17,7 +50,7 @@ function showPopup(message) {
   }
   popup.textContent = message;
   popup.classList.add("show");
-  setTimeout(() => popup.classList.remove("show"), 2000);
+  setTimeout(() => popup.classList.remove("show"), 6000);
 }
 
 function triggerConfetti(e) {
@@ -69,7 +102,8 @@ async function createGuestBooking(data) {
       name: data.name,
       phone: data.phone,
       timeSlot: data.timeSlot,
-      notes: data.notes || ''
+      notes: data.notes || '',
+      deviceId: getOrCreateDeviceId()
     })
   });
 
@@ -316,7 +350,18 @@ document.addEventListener("DOMContentLoaded", async () => {
     const phone = form.querySelector('input[placeholder="Phone Number"]').value;
     const notes = form.querySelector('textarea').value;
     const timeSlotField = document.getElementById("timeSlotHidden");
-    const timeSlot = timeSlotField ? timeSlotField.value : "Not selected";
+    const timeSlot = timeSlotField ? timeSlotField.value : "";
+
+    // Require a selected date + time slot
+    if (!timeSlot) {
+      showPopup("⚠️ Please select a date and time before booking.");
+      // Scroll booking section into view to make it obvious
+      const bookingSection = document.getElementById('booking');
+      if (bookingSection) {
+        bookingSection.scrollIntoView({ behavior: 'smooth' });
+      }
+      return;
+    }
 
     // Validate phone number before submitting
     const phoneValidation = validatePhoneNumber(phone);
@@ -328,12 +373,16 @@ document.addEventListener("DOMContentLoaded", async () => {
     // Remove any error messages if phone is valid
     removePhoneError();
 
+    // Layer 1: Device fingerprint check (client-side, 5-minute cooldown)
+    if (isRateLimitedLocally()) return;
+
     const data = {
       name,
       phone,
       timeSlot,
       notes,
-      timestamp: new Date()
+      timestamp: new Date(),
+      status: 'pending' // awaiting barber approval
     };
 
     try {
@@ -371,6 +420,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         }
       }
       
+      recordBookingTimestamp(); // start 5-minute cooldown on this device
       confetti();
       showPopup("✅ Booking Confirmed!");
       
@@ -395,7 +445,8 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
     } catch (err) {
       console.error('Error saving booking:', err);
-      alert("Something went wrong. Try again.");
+      // Show the server's message (e.g. rate limit) if available, otherwise generic fallback
+      showPopup(err.message && err.message !== 'Failed to fetch' ? err.message : 'Something went wrong. Please try again.');
     }
   });
   
@@ -613,59 +664,32 @@ function setupBookingLookup() {
   console.log('✅ Booking lookup elements found, setting up click handler...');
   
   lookupBtn.addEventListener('click', async () => {
-    console.log('🔍 Look Up button clicked!');
     const phone = lookupPhone.value.trim();
     
     if (!phone) {
-      alert('Please enter your phone number.');
+      showPopup('Please enter your phone number.');
       return;
     }
     
-    console.log('Looking up booking for phone:', phone);
-    
     try {
-      // Format phone number for search
-      const formattedPhone = formatPhoneNumber(phone);
-      console.log('Formatted phone:', formattedPhone);
-      
-      // Search for bookings with this phone number (simplified query to avoid index requirement)
-      let bookingsSnapshot = await db.collection("bookings")
-        .where("phone", "==", formattedPhone)
-        .get();
-      
-      // If no results with formatted phone, try with original phone number
-      if (bookingsSnapshot.empty) {
-        console.log('No results with formatted phone, trying original...');
-        bookingsSnapshot = await db.collection("bookings")
-          .where("phone", "==", phone)
-          .get();
+      const baseUrl = getFunctionsBaseUrl();
+      if (!baseUrl) throw new Error('Functions URL unavailable');
+
+      const res = await fetch(`${baseUrl}/lookupBookingByPhone`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone })
+      });
+
+      const payload = await res.json().catch(() => ({}));
+
+      if (!res.ok || !payload.success) {
+        throw new Error(payload.message || 'Lookup failed');
       }
-      
-      // If still no results, let's get ALL bookings to see what phone formats exist
-      if (bookingsSnapshot.empty) {
-        console.log('No results with either format, getting all bookings to debug...');
-        const allBookings = await db.collection("bookings").get();
-        console.log('All bookings in database:', allBookings.docs.map(doc => ({
-          id: doc.id,
-          phone: doc.data().phone,
-          name: doc.data().name,
-          timeSlot: doc.data().timeSlot
-        })));
-        
-        lookupResults.innerHTML = `
-          <div style="text-align: center; padding: 20px; background: #2a2a2a; border-radius: 8px; border: 1px solid #555;">
-            <p style="color: #ccc; margin: 0;">No bookings found for this phone number.</p>
-            <p style="color: #666; margin: 5px 0; font-size: 12px;">Debug: Check console for database contents</p>
-            <p style="color: #666; margin: 5px 0; font-size: 12px;">Searched for: "${phone}" and "${formattedPhone}"</p>
-          </div>
-        `;
-        lookupResults.style.display = 'block';
-        return;
-      }
-      
-      console.log('Found bookings:', bookingsSnapshot.size);
-      
-      if (bookingsSnapshot.empty) {
+
+      const bookings = payload.bookings || [];
+
+      if (bookings.length === 0) {
         lookupResults.innerHTML = `
           <div style="text-align: center; padding: 20px; background: #2a2a2a; border-radius: 8px; border: 1px solid #555;">
             <p style="color: #ccc; margin: 0;">No bookings found for this phone number.</p>
@@ -674,25 +698,21 @@ function setupBookingLookup() {
         lookupResults.style.display = 'block';
         return;
       }
-      
-      // Display bookings
+
       let resultsHTML = '<div style="text-align: center; margin-bottom: 20px;"><h4 style="color: #CE1126; margin: 0;">Your Bookings:</h4></div>';
-      
-      bookingsSnapshot.forEach(doc => {
-        const booking = doc.data();
-        console.log('Booking data:', booking);
-        
+
+      bookings.forEach(booking => {
         const timeSlot = booking.timeSlot;
-        const [date, time] = timeSlot.split(' ');
-        
-        // Format date for display
+        const [date, ...timeParts] = timeSlot.split(' ');
+        const time = timeParts.join(' ');
+
         const formattedDate = new Date(date).toLocaleDateString('en-US', {
           weekday: 'long',
           year: 'numeric',
           month: 'long',
           day: 'numeric'
         });
-        
+
         resultsHTML += `
           <div style="background: #2a2a2a; padding: 20px; border-radius: 8px; border: 1px solid #555; margin-bottom: 15px;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
@@ -704,20 +724,20 @@ function setupBookingLookup() {
               <p style="color: #ccc; margin: 5px 0;"><strong>Phone:</strong> ${booking.phone}</p>
               ${booking.notes ? `<p style="color: #ccc; margin: 5px 0;"><strong>Notes:</strong> ${booking.notes}</p>` : ''}
             </div>
-            <button onclick="cancelBooking('${doc.id}', '${booking.name}')" 
+            <button onclick="cancelBooking('${booking.bookingId}', '${booking.name}')" 
                     style="background: #f44336; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: bold;">
               🗑️ Cancel Booking
             </button>
           </div>
         `;
       });
-      
+
       lookupResults.innerHTML = resultsHTML;
       lookupResults.style.display = 'block';
-      
+
     } catch (error) {
       console.error('Error looking up booking:', error);
-      alert('Sorry, there was an error looking up your booking. Please try again.');
+      showPopup('Sorry, there was an error looking up your booking. Please try again.');
     }
   });
 }
@@ -769,28 +789,50 @@ function showCancellationModal(bookingId, customerName) {
   console.log('✅ Event listeners attached');
 }
 
-// Perform the actual cancellation
+// Perform the actual cancellation — routes through Cloud Function so guests can cancel
+// without needing Firestore write access. Phone number is verified server-side.
 async function performCancellation(bookingId, customerName) {
   try {
-    await db.collection("bookings").doc(bookingId).delete();
-    
-    // Show success message
-    showPopup("✅ Booking cancelled successfully!");
-    
-    // Refresh the lookup results
-    document.getElementById('lookupResults').style.display = 'none';
-    document.getElementById('lookupPhone').value = '';
-    
-    // Refresh user bookings if logged in
-    if (window.refreshUserBookings) {
-      setTimeout(() => {
-        window.refreshUserBookings();
-      }, 500);
+    const phone = document.getElementById('lookupPhone') ? document.getElementById('lookupPhone').value.trim() : '';
+    const baseUrl = getFunctionsBaseUrl();
+
+    if (baseUrl && phone) {
+      // Use Cloud Function (works for both guests and logged-in users)
+      const res = await fetch(`${baseUrl}/cancelGuestBooking`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bookingId, phone })
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok || !payload.success) {
+        throw new Error(payload.message || 'Cancellation failed');
+      }
+    } else if (authManager && authManager.isLoggedIn()) {
+      // Fallback: logged-in user cancelling from their bookings panel (not lookup section)
+      await db.collection("bookings").doc(bookingId).delete();
+    } else {
+      throw new Error('Unable to cancel — please enter your phone number in the lookup field first.');
     }
-    
+
+    // Lift the local rate limit so they can rebook immediately
+    localStorage.removeItem('mexicuts_last_booking');
+
+    showPopup("✅ Booking cancelled successfully!");
+
+    // Hide lookup results
+    const lookupResults = document.getElementById('lookupResults');
+    const lookupPhone = document.getElementById('lookupPhone');
+    if (lookupResults) lookupResults.style.display = 'none';
+    if (lookupPhone) lookupPhone.value = '';
+
+    // Refresh user bookings panel if logged in
+    if (window.refreshUserBookings) {
+      setTimeout(() => window.refreshUserBookings(), 500);
+    }
+
   } catch (error) {
     console.error('Error cancelling booking:', error);
-    alert('Sorry, there was an error cancelling your booking. Please try again.');
+    showPopup(error.message || 'Sorry, there was an error cancelling your booking. Please try again.');
   }
 }
 

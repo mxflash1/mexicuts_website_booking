@@ -1,4 +1,5 @@
-document.addEventListener("DOMContentLoaded", async function () {
+document.addEventListener("DOMContentLoaded", function () {
+  async function startAdminPanel() {
   // Initialize Firebase with secure configuration
   let firebaseConfig = null;
   
@@ -127,7 +128,9 @@ document.addEventListener("DOMContentLoaded", async function () {
     }
   }
 
-  // Load bookings and create events
+  // Load bookings and create events for calendar
+  // Show only approved bookings in the calendar, but treat old bookings
+  // without a status field as approved so history still appears.
   window.db.collection("bookings").get().then(snapshot => {
     snapshot.forEach(doc => {
       const data = doc.data();
@@ -156,8 +159,15 @@ document.addEventListener("DOMContentLoaded", async function () {
           phone: data.phone,
           timeSlot: data.timeSlot,
           notes: data.notes || '',
+          status: data.status || 'pending',
           timestamp: data.timestamp
         });
+
+        // Only approved (or legacy with no status) go into the calendar view
+        const status = data.status || 'approved';
+        if (status !== 'approved') {
+          return;
+        }
 
         events.push({
           id: doc.id,
@@ -208,8 +218,78 @@ document.addEventListener("DOMContentLoaded", async function () {
 
     calendar.render();
   }).catch(error => {
-    console.error("Error fetching bookings:", error);
+    console.error("Error fetching approved bookings:", error);
   });
+
+  // Load PENDING bookings for separate list
+  async function loadPendingBookings() {
+    const container = document.getElementById('pendingBookingsList');
+    if (!container) return;
+
+    try {
+      // Show both pending and rejected bookings in this list so a mistaken
+      // reject can be corrected, and you can delete after rejecting.
+      const snapshot = await window.db.collection('bookings')
+        .where('status', 'in', ['pending', 'rejected'])
+        .get();
+
+      if (snapshot.empty) {
+        container.innerHTML = `
+          <p style="text-align:center; color:#999; padding:10px;">
+            No pending bookings right now.
+          </p>
+        `;
+        return;
+      }
+
+      let html = '';
+      snapshot.forEach(doc => {
+        const data = doc.data();
+        const id = doc.id;
+        const status = data.status || 'pending';
+        const statusLabel = status.toUpperCase();
+        const statusColor = status === 'approved' ? '#4CAF50'
+                            : status === 'rejected' ? '#f44336'
+                            : '#FFC107';
+        html += `
+          <div style="background:#1a1a1a; border:1px solid #555; border-radius:8px; padding:12px 14px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center; gap:10px;">
+            <div style="flex:1; min-width:0;">
+              <div style="color:white; font-weight:bold; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                ${data.name || 'Unknown'} (${data.phone || 'N/A'})
+              </div>
+              <div style="color:#ccc; font-size:13px; margin-top:2px;">
+                ${data.timeSlot || ''}
+              </div>
+              <div style="color:${statusColor}; font-size:11px; margin-top:2px; font-weight:bold;">
+                ${statusLabel}
+              </div>
+            </div>
+            <div style="display:flex; gap:6px; flex-shrink:0;">
+              <button onclick="window.approvePendingBooking('${id}')" 
+                      style="background:#4CAF50; color:white; border:none; padding:6px 10px; border-radius:6px; font-size:12px; cursor:pointer;">
+                ✅ Accept
+              </button>
+              <button onclick="window.rejectPendingBooking('${id}')" 
+                      style="background:#f0ad4e; color:white; border:none; padding:6px 10px; border-radius:6px; font-size:12px; cursor:pointer;">
+                ❌ Reject
+              </button>
+              <button onclick="window.deletePendingBooking('${id}')" 
+                      style="background:#CE1126; color:white; border:none; padding:6px 10px; border-radius:6px; font-size:12px; cursor:pointer;">
+                🗑️ Delete
+              </button>
+            </div>
+          </div>
+        `;
+      });
+
+      container.innerHTML = html;
+    } catch (err) {
+      console.error('Error loading pending bookings:', err);
+    }
+  }
+
+  // Expose so Pending tab can call it
+  window.loadPendingBookings = loadPendingBookings;
 
   // Show booking management modal
   function showBookingModal(bookingId, booking) {
@@ -221,6 +301,13 @@ document.addEventListener("DOMContentLoaded", async function () {
     document.getElementById("editPhone").value = booking.phone;
     document.getElementById("editTimeSlot").value = booking.timeSlot;
     document.getElementById("editNotes").value = booking.notes;
+    const statusLabelEl = document.getElementById("bookingStatusLabel");
+    if (statusLabelEl) {
+      const status = booking.status || 'pending';
+      statusLabelEl.textContent = status.toUpperCase();
+      statusLabelEl.style.color = status === 'approved' ? '#4CAF50' :
+                                  status === 'rejected' ? '#f44336' : '#FFC107';
+    }
     
     modal.style.display = "block";
     
@@ -247,6 +334,46 @@ document.addEventListener("DOMContentLoaded", async function () {
       }
     };
     
+    // Handle status changes without sending extra emails
+    const approveBtn = document.getElementById("approveBookingBtn");
+    const rejectBtn = document.getElementById("rejectBookingBtn");
+
+    if (approveBtn) {
+      approveBtn.onclick = async function () {
+        try {
+          await window.db.collection("bookings").doc(bookingId).update({
+            status: 'approved'
+          });
+          showStatusMessage("✅ Booking marked as approved", "success");
+          if (statusLabelEl) {
+            statusLabelEl.textContent = 'APPROVED';
+            statusLabelEl.style.color = '#4CAF50';
+          }
+        } catch (err) {
+          console.error("Error approving booking:", err);
+          showStatusMessage("❌ Error approving booking", "error");
+        }
+      };
+    }
+
+    if (rejectBtn) {
+      rejectBtn.onclick = async function () {
+        try {
+          await window.db.collection("bookings").doc(bookingId).update({
+            status: 'rejected'
+          });
+          showStatusMessage("✅ Booking marked as rejected", "success");
+          if (statusLabelEl) {
+            statusLabelEl.textContent = 'REJECTED';
+            statusLabelEl.style.color = '#f44336';
+          }
+        } catch (err) {
+          console.error("Error rejecting booking:", err);
+          showStatusMessage("❌ Error rejecting booking", "error");
+        }
+      };
+    }
+
     // Handle delete button
     document.getElementById("deleteBooking").onclick = function() {
       showDeleteConfirmation(booking.name, () => deleteBooking(bookingId));
@@ -490,7 +617,8 @@ document.addEventListener("DOMContentLoaded", async function () {
       phone: phone,
       timeSlot: timeSlot,
       notes: notes,
-      timestamp: firebase.firestore.FieldValue.serverTimestamp()
+      timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+      status: 'approved' // admin-created bookings are confirmed
     };
 
     // Add userId if user exists
@@ -533,4 +661,49 @@ document.addEventListener("DOMContentLoaded", async function () {
       showStatusMessage("❌ Error creating booking. Please try again.", "error");
     }
   };
-});
+  // Helpers exposed for pending bookings list
+  window.approvePendingBooking = async function (bookingId) {
+    try {
+      await window.db.collection('bookings').doc(bookingId).update({ status: 'approved' });
+      showStatusMessage('✅ Booking approved', 'success');
+      loadPendingBookings();
+      setTimeout(() => location.reload(), 800);
+    } catch (err) {
+      console.error('Error approving pending booking:', err);
+      showStatusMessage('❌ Error approving booking', 'error');
+    }
+  };
+
+  window.rejectPendingBooking = async function (bookingId) {
+    try {
+      await window.db.collection('bookings').doc(bookingId).update({ status: 'rejected' });
+      showStatusMessage('✅ Booking rejected', 'success');
+      loadPendingBookings();
+    } catch (err) {
+      console.error('Error rejecting pending booking:', err);
+      showStatusMessage('❌ Error rejecting booking', 'error');
+    }
+  };
+
+  window.deletePendingBooking = async function (bookingId) {
+    try {
+      await window.db.collection('bookings').doc(bookingId).delete();
+      showStatusMessage('✅ Booking deleted', 'success');
+      loadPendingBookings();
+    } catch (err) {
+      console.error('Error deleting pending booking:', err);
+      showStatusMessage('❌ Error deleting booking', 'error');
+    }
+  };
+}
+
+  if (window.isAdmin) {
+    console.log('✅ Admin already authenticated, starting admin panel');
+    startAdminPanel().catch(e => console.error('Admin panel init error:', e));
+  } else {
+    console.log('⏳ Waiting for admin authentication before loading admin panel...');
+    window.__deferredAdminStart = function () {
+      startAdminPanel().catch(e => console.error('Admin panel init error (deferred):', e));
+    };
+  }
+}); 
