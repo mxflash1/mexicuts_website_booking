@@ -68,17 +68,13 @@ function parseBookingDate(timeSlot) {
   }
 }
 
-// Format weeks to readable string
+// Format weeks to readable string — always in weeks for consistency
 function formatWeeks(weeks) {
   if (weeks < 1) {
     const days = Math.round(weeks * 7);
     return `${days} day${days !== 1 ? 's' : ''}`;
-  } else if (weeks < 4) {
-    return `${weeks.toFixed(1)} week${weeks >= 2 ? 's' : ''}`;
-  } else {
-    const months = weeks / 4.33; // Average weeks per month
-    return `${months.toFixed(1)} month${months >= 2 ? 's' : ''}`;
   }
+  return `${weeks.toFixed(1)} week${weeks.toFixed(1) !== '1.0' ? 's' : ''}`;
 }
 
 // Display skeleton/placeholder leaderboard

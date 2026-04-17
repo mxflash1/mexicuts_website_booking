@@ -309,7 +309,7 @@ exports.createGuestBooking = onRequest(
     }
 
     try {
-      const { name, phone, timeSlot, notes, deviceId } = req.body || {};
+      const { name, phone, timeSlot, notes, service, price, deviceId } = req.body || {};
 
       if (!name || !phone || !timeSlot) {
         res.status(400).json({ success: false, message: 'Missing required fields' });
@@ -321,35 +321,56 @@ exports.createGuestBooking = onRequest(
         return;
       }
 
+      // Name validation: max 75 chars, letters/spaces/hyphens/apostrophes/periods only
+      const trimmedName = name.trim();
+      if (trimmedName.length > 75) {
+        res.status(400).json({ success: false, message: 'Name must be 75 characters or fewer.' });
+        return;
+      }
+      if (!/^[a-zA-ZÀ-ÿ\s'\-.]+$/.test(trimmedName)) {
+        res.status(400).json({ success: false, message: 'Name can only contain letters, spaces, hyphens, apostrophes and periods.' });
+        return;
+      }
+
       const slotId = slotDocIdFromTimeSlot(timeSlot);
       if (!slotId) {
         res.status(400).json({ success: false, message: 'Invalid time slot' });
         return;
       }
 
-      // ── Three-layer rate limiting ────────────────────────────────────────
       const db = admin.firestore();
+
+      // ── Registered-account check ─────────────────────────────────────────
+      // If this phone number already has an account, reject guest booking.
+      const existingUser = await db.collection('users').where('phone', '==', phone.trim()).get();
+      if (!existingUser.empty) {
+        res.status(403).json({
+          success: false,
+          message: '📱 This number is already linked to an account. Please log in to book.'
+        });
+        return;
+      }
+      // ─────────────────────────────────────────────────────────────────────
+
+      // ── Three-layer rate limiting ────────────────────────────────────────
       const TEN_MIN_MS = 10 * 60 * 1000;
       const tenMinutesAgo = new Date(Date.now() - TEN_MIN_MS);
 
       function rateLimitMsg(lastBookingDate) {
         const remaining = Math.ceil((TEN_MIN_MS - (Date.now() - lastBookingDate.getTime())) / 60000);
         const plural = remaining === 1 ? 'minute' : 'minutes';
-        return `⏳ Please wait ${remaining} more ${plural} before making another booking. To avoid this, delete your current booking.`;
+        return `⏳ Please wait ${remaining} more ${plural} before making another booking. To avoid this, make an account.`;
       }
 
-      // Extract caller IP (Cloud Run puts original IP in x-forwarded-for)
-      const rawIp = (req.headers['x-forwarded-for'] || req.ip || '').split(',')[0].trim();
-      const ipKey = rawIp ? 'ip_' + rawIp.replace(/[.:]/g, '_') : null;
       const devKey = (deviceId && typeof deviceId === 'string' && deviceId.length > 0)
         ? 'dev_' + deviceId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 100)
         : null;
 
-      // Layer 1 (server): IP address check
-      if (ipKey) {
-        const ipDoc = await db.collection('rateLimits').doc(ipKey).get();
-        if (ipDoc.exists) {
-          const last = ipDoc.data().lastBooking;
+      // Layer 1 (server): Device fingerprint check
+      if (devKey) {
+        const devDoc = await db.collection('rateLimits').doc(devKey).get();
+        if (devDoc.exists) {
+          const last = devDoc.data().lastBooking;
           if (last && last.toDate() > tenMinutesAgo) {
             res.status(429).json({ success: false, message: rateLimitMsg(last.toDate()) });
             return;
@@ -357,11 +378,13 @@ exports.createGuestBooking = onRequest(
         }
       }
 
-      // Layer 2 (server): Device fingerprint check
-      if (devKey) {
-        const devDoc = await db.collection('rateLimits').doc(devKey).get();
-        if (devDoc.exists) {
-          const last = devDoc.data().lastBooking;
+      // Layer 2 (server): IP address check
+      const rawIp = (req.headers['x-forwarded-for'] || req.ip || '').split(',')[0].trim();
+      const ipKey = rawIp ? 'ip_' + rawIp.replace(/[.:]/g, '_') : null;
+      if (ipKey) {
+        const ipDoc = await db.collection('rateLimits').doc(ipKey).get();
+        if (ipDoc.exists) {
+          const last = ipDoc.data().lastBooking;
           if (last && last.toDate() > tenMinutesAgo) {
             res.status(429).json({ success: false, message: rateLimitMsg(last.toDate()) });
             return;
@@ -404,6 +427,8 @@ exports.createGuestBooking = onRequest(
           phone: phone.trim(),
           timeSlot: timeSlot.trim(),
           notes: typeof notes === 'string' ? notes.trim() : '',
+          service: typeof service === 'string' && service.trim() ? service.trim() : 'Fade',
+          price: typeof price === 'number' && price > 0 ? price : 20,
           timestamp: admin.firestore.FieldValue.serverTimestamp(),
           guest: true,
           status: 'pending'
@@ -412,13 +437,13 @@ exports.createGuestBooking = onRequest(
 
       // Record this booking in rateLimits for future checks
       const rlBatch = db.batch();
-      if (ipKey) {
-        rlBatch.set(db.collection('rateLimits').doc(ipKey), {
+      if (devKey) {
+        rlBatch.set(db.collection('rateLimits').doc(devKey), {
           lastBooking: admin.firestore.FieldValue.serverTimestamp()
         });
       }
-      if (devKey) {
-        rlBatch.set(db.collection('rateLimits').doc(devKey), {
+      if (ipKey) {
+        rlBatch.set(db.collection('rateLimits').doc(ipKey), {
           lastBooking: admin.firestore.FieldValue.serverTimestamp()
         });
       }
@@ -432,6 +457,47 @@ exports.createGuestBooking = onRequest(
       }
       console.error('❌ createGuestBooking error:', err);
       res.status(500).json({ success: false, message: 'Failed to create booking' });
+    }
+  }
+);
+
+// Admin endpoint: notify a client via SMS that their appointment has been rescheduled.
+// Called by the admin page after updating a booking's timeSlot.
+exports.notifyReschedule = onRequest(
+  { region: 'us-central1', invoker: 'public', cors: true, secrets: [TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER] },
+  async (req, res) => {
+    try {
+      const { bookingId, newTimeSlot, phone, name } = req.body || {};
+
+      if (!bookingId || !newTimeSlot || !phone) {
+        res.status(400).json({ success: false, message: 'Missing required fields' });
+        return;
+      }
+
+      const formattedDate = formatReadableDate(newTimeSlot);
+      // timeSlot format: "YYYY-MM-DD HH:MM" — time is everything after first space
+      const spaceIdx = newTimeSlot.indexOf(' ');
+      const time = spaceIdx !== -1 ? newTimeSlot.slice(spaceIdx + 1) : newTimeSlot;
+
+      const formattedPhone = formatPhoneNumber(phone);
+      const smsBody =
+        `Hi ${name || 'there'}, your Mexi Cuts appointment has been rescheduled.\n` +
+        `New date: ${formattedDate}\nNew time: ${time}\n` +
+        `Location: 6 Rosella Tce, Peregian Springs\n` +
+        `Questions? Call/text 0402098123. DO NOT REPLY`;
+
+      const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+      const msg = await twilioClient.messages.create({
+        body: smsBody,
+        from: process.env.TWILIO_PHONE_NUMBER,
+        to: formattedPhone
+      });
+
+      console.log(`✅ Reschedule SMS sent | booking: ${bookingId} | to: ${formattedPhone} | Twilio SID: ${msg.sid} | status: ${msg.status}`);
+      res.json({ success: true, sid: msg.sid });
+    } catch (err) {
+      console.error('❌ notifyReschedule error:', err);
+      res.status(500).json({ success: false, message: 'Failed to send reschedule notification' });
     }
   }
 );
@@ -1293,7 +1359,7 @@ async function sendPaymentReminderEmail(booking, bookingId) {
             </p>
             
             <div style="text-align: center; margin-top: 25px;">
-              <a href="https://mexicuts-booking.web.app/admin_mxcts2009.html" 
+              <a href="https://mexicuts-booking.web.app/admin_mxcts2010.html" 
                  style="background: #CE1126; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: bold;">
                 Go to Admin Panel
               </a>
@@ -1611,14 +1677,14 @@ exports.updateUserFrequencyStats = onSchedule(
         
         bookingsSnapshot.forEach(doc => {
           const booking = doc.data();
+          // Only count approved bookings (treat no-status legacy bookings as approved)
+          const status = booking.status || 'approved';
+          if (status !== 'approved') return;
+
           if (booking.timeSlot) {
             const bookingDate = parseAppointmentTime(booking.timeSlot);
             if (bookingDate && bookingDate >= FEB_14_2026) {
               bookingsAfterFeb14.push(bookingDate);
-              
-              // For testing purposes: include FUTURE bookings in frequency calculation
-              // This allows testing the leaderboard before bookings are completed
-              // In production, you can change this to only count past bookings
               completedBookingsAfterFeb14.push(bookingDate);
             }
           }
@@ -2240,11 +2306,14 @@ exports.updateFrequencyStatsNow = onRequest(
         
         bookingsSnapshot.forEach(doc => {
           const booking = doc.data();
+          // Only count approved bookings (treat no-status legacy bookings as approved)
+          const status = booking.status || 'approved';
+          if (status !== 'approved') return;
+
           if (booking.timeSlot) {
             const bookingDate = parseAppointmentTime(booking.timeSlot);
             if (bookingDate && bookingDate >= FEB_14_2026) {
               bookingsAfterFeb14.push(bookingDate);
-              // For testing: include future bookings
               completedBookingsAfterFeb14.push(bookingDate);
             }
           }

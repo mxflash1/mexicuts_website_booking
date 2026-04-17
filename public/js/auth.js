@@ -212,6 +212,38 @@ class AuthManager {
   }
 
   // Log out user
+  // Delete the current user's account.
+  // Removes the Firestore user document and the Firebase Auth account.
+  // Their past bookings are kept for admin records but unlinked (userId removed).
+  async deleteAccount() {
+    try {
+      const firebaseUser = this.auth.currentUser;
+      if (!firebaseUser) throw new Error('No user is currently signed in.');
+
+      const uid = firebaseUser.uid;
+
+      // Unlink bookings (remove userId field so they become anonymous records)
+      const bookingsSnap = await this.db.collection('bookings').where('userId', '==', uid).get();
+      const batch = this.db.batch();
+      bookingsSnap.forEach(doc => {
+        batch.update(doc.ref, { userId: firebase.firestore.FieldValue.delete() });
+      });
+
+      // Delete the user document from Firestore
+      batch.delete(this.db.collection('users').doc(uid));
+      await batch.commit();
+
+      // Delete the Firebase Auth account last
+      await firebaseUser.delete();
+
+      console.log('✅ Account deleted for uid:', uid);
+      return { success: true };
+    } catch (error) {
+      console.error('❌ Delete account error:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
   async logout() {
     try {
       await this.auth.signOut();

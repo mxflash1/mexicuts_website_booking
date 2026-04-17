@@ -108,6 +108,9 @@ async function loadPendingPayments() {
       const hasPaymentMethod = payment.paymentMethod && payment.paymentMethod !== 'pending';
       const methodText = payment.paymentMethod === 'cash' ? '💵 Cash' : payment.paymentMethod === 'card' ? '💳 Card' : '';
       
+      const displayPrice = payment.price || 20;
+      const serviceLabel = payment.service ? `✂️ ${payment.service}` : '✂️ Haircut';
+
       html += `
         <div class="payment-card" style="
           background: #1a1a1a;
@@ -122,7 +125,18 @@ async function loadPendingPayments() {
               <div style="color: #ccc; font-size: 14px;">
                 <div>📅 ${payment.timeSlot}</div>
                 <div>📱 ${payment.phone}</div>
-                <div>💵 $20</div>
+                <div style="color: #a0cfff;">${serviceLabel}</div>
+                <div style="display:flex; align-items:center; gap:6px; margin-top:4px;">
+                  💵 $<input
+                    type="number"
+                    id="price-${payment.id}"
+                    value="${displayPrice}"
+                    min="1"
+                    style="width:60px; padding:3px 6px; border-radius:4px; border:1px solid #555; background:#2a2a2a; color:white; font-size:14px;"
+                    onchange="updateBookingPrice('${payment.id}', this.value)"
+                  />
+                  <span style="color:#888; font-size:12px;">(editable)</span>
+                </div>
                 ${hasPaymentMethod ? `<div style="margin-top: 8px; color: #4CAF50; font-weight: bold;">✓ Method: ${methodText}</div>` : ''}
               </div>
             </div>
@@ -362,10 +376,27 @@ async function testPaymentSheetAdd() {
   }
 }
 
+// Update the price for a booking directly from the payments page
+async function updateBookingPrice(bookingId, newPrice) {
+  const parsed = parseFloat(newPrice);
+  if (isNaN(parsed) || parsed <= 0) {
+    await customAlert('❌ Invalid Price', 'Please enter a valid price greater than $0.');
+    return;
+  }
+  try {
+    await window.db.collection('bookings').doc(bookingId).update({ price: parsed });
+    console.log(`✅ Price updated to $${parsed} for booking ${bookingId}`);
+  } catch (error) {
+    console.error('Error updating price:', error);
+    await customAlert('❌ Error', 'Could not update price: ' + error.message);
+  }
+}
+
 // Export functions
 window.loadPendingPayments = loadPendingPayments;
 window.setPaymentMethod = setPaymentMethod;
 window.confirmPaymentReceived = confirmPaymentReceived;
 window.changePaymentMethod = changePaymentMethod;
 window.testPaymentSheetAdd = testPaymentSheetAdd;
+window.updateBookingPrice = updateBookingPrice;
 

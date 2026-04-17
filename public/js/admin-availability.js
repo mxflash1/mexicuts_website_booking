@@ -19,7 +19,7 @@ class AdminAvailabilityManager {
         minBookingNotice: 2
       },
       displayText: {
-        availabilityDescription: "Each cut is $20. Times available:",
+        availabilityDescription: "Fade or Trim: $20 · Both: $25. Times available:",
         scheduleText: {
           Saturday: "Saturdays: 8:00am – 6:00pm",
           Tuesday: "Tuesdays: 3:30pm – 4:30pm", 

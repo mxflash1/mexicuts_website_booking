@@ -213,7 +213,7 @@ function createBookingCard(booking, isUpcoming) {
       <!-- Booking Details -->
       <div style="margin-bottom: 15px; padding: 12px; background: #1a1a1a; border-radius: 6px; border-left: 3px solid ${borderColor};">
         <div style="color: #ccc; margin-bottom: 5px;">
-          <strong>Service:</strong> Haircut ($20)
+          <strong>Service:</strong> ${booking.service ? `${booking.service}${booking.price ? ` ($${booking.price})` : ''}` : 'Haircut ($20)'}
         </div>
         <div style="color: #ccc; margin-bottom: 5px;">
           <strong>Location:</strong> Peregian Springs, Sunshine Coast

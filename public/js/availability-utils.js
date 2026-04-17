@@ -119,7 +119,10 @@ class AvailabilityManager {
       this.config.displayText.scheduleText[day] || `${day}: Check calendar`
     );
 
-    return `${this.config.displayText.availabilityDescription}<br>${scheduleLines.join('<br>')}`;
+    // Normalise any legacy "$20" description stored in Firestore to the current pricing text.
+    const rawDesc = this.config.displayText.availabilityDescription || '';
+    const description = rawDesc.replace(/Each cut is \$20\.?/, 'Fade or Trim: $20 · Both: $25.');
+    return `${description}<br>${scheduleLines.join('<br>')}`;
   }
 
   // Check if a specific date is blocked

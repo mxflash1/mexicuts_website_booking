@@ -8,16 +8,23 @@
     <meta name="keywords" content="barbershop, haircut, Peregian Springs, Sunshine Coast, men's grooming, professional barber" />
     
     <!-- Favicon -->
-    <link rel="icon" type="image/png" sizes="32x32" href="images/favicon.png" />
-    <link rel="apple-touch-icon" href="images/favicon.png" />
-    <link rel="shortcut icon" href="images/favicon.png" />
+    <link rel="icon" type="image/png" href="images/admin-favicon.png" />
+    <link rel="apple-touch-icon" href="images/admin-favicon.png" />
+    <link rel="shortcut icon" href="images/admin-favicon.png" />
     
     <!-- Open Graph / Social Media -->
     <meta property="og:type" content="website" />
     <meta property="og:title" content="Mexi Cuts - Professional Barbershop" />
     <meta property="og:description" content="Professional barbershop services in Peregian Springs, Sunshine Coast. Book your appointment online." />
-    <meta property="og:image" content="images/favicon.png" />
+    <meta property="og:image" content="images/admin-favicon.png" />
     
+    <!-- Redirect .web.app visitors to the real domain -->
+    <script>
+      if (window.location.hostname.includes('web.app') || window.location.hostname.includes('firebaseapp.com')) {
+        window.location.replace('https://mexicuts.au' + window.location.pathname + window.location.search);
+      }
+    </script>
+
     <link rel="stylesheet" href="css/style.css" />
   
     <!-- Flatpickr Styles and Script -->
@@ -58,9 +65,14 @@
                 ➕ New Booking
               </a>
               <a href="#" onclick="logout(); toggleAccountMenu();" 
-                 style="display: block; padding: 12px 14px; color: #f44336; text-decoration: none; transition: background 0.2s; font-size: 13px; font-family: 'VT323', monospace;"
+                 style="display: block; padding: 12px 14px; color: #f44336; text-decoration: none; transition: background 0.2s; font-size: 13px; font-family: 'VT323', monospace; border-bottom: 1px solid #333;"
                  onmouseover="this.style.background='#2a2a2a'" onmouseout="this.style.background=''">
                 🚪 Log Out
+              </a>
+              <a href="#" onclick="deleteAccount(); return false;" 
+                 style="display: block; padding: 12px 14px; color: #888; text-decoration: none; transition: background 0.2s; font-size: 13px; font-family: 'VT323', monospace;"
+                 onmouseover="this.style.background='#2a2a2a'; this.style.color='#f44336'" onmouseout="this.style.background=''; this.style.color='#888'">
+                🗑️ Delete Account
               </a>
             </div>
           </div>
@@ -79,7 +91,7 @@
 
   <section id="about">
     <h2>About Mexi_Cuts</h2>
-    <p>The best haircuts for your money. Only $20 with a professional standard. Run by your local teen barber.</p>
+    <p>The best haircuts for your money. Only $20-25 with a professional standard. Run by your local teen barber.</p>
     <p style="font-size: 14px; color: #666; font-style: italic; margin-top: 15px;">
       <em>*You will receive the exact address when you book your appointment</em>
     </p>
@@ -92,7 +104,7 @@
 
   <section id="booking">
     <h2>Book Your MexiCut</h2>
-    <p><strong>Each cut is $20. Times available:</strong><br>
+    <p><strong>Fade or Trim: $20 &nbsp;·&nbsp; Both: $25. Times available:</strong><br>
     Saturdays: 8:00am – 6:00pm<br>
     Tuesdays & Thursdays: 3:30pm – 4:30pm</p>
     
@@ -112,6 +124,27 @@
         <input type="text" placeholder="Full Name" required />
         <input type="tel" placeholder="Phone Number" required />
       </div>
+      <!-- Service selector -->
+      <div id="serviceSelector">
+        <p class="service-label">Select your service:</p>
+        <div id="serviceOptions">
+          <button type="button" class="service-btn" data-service="Fade" data-price="20">
+            <span class="service-name">Fade</span>
+            <span class="service-price">$20</span>
+          </button>
+          <button type="button" class="service-btn" data-service="Trim" data-price="20">
+            <span class="service-name">Trim</span>
+            <span class="service-price">$20</span>
+          </button>
+          <button type="button" class="service-btn" data-service="Fade + Trim" data-price="25">
+            <span class="service-name">Both</span>
+            <span class="service-price">$25</span>
+          </button>
+        </div>
+        <input type="hidden" id="selectedServiceHidden" name="service" />
+        <input type="hidden" id="selectedPriceHidden" name="price" />
+      </div>
+
       <textarea placeholder="Notes (optional)"></textarea>
       <!-- calendar and timeSlots will be injected here -->
       <button type="submit">Confirm Booking</button>
@@ -251,8 +284,9 @@
         <form onsubmit="handleSignup(event)" style="display: flex; flex-direction: column; gap: 12px;">
           <div>
             <label style="display: block; color: #ccc; margin-bottom: 5px; font-size: clamp(12px, 3vw, 14px); font-family: 'VT323', monospace;">👤 Full Name</label>
-            <input type="text" id="signupName" placeholder="John Smith" required 
-                   style="width: 100%; padding: 14px; border: 1px solid #555; border-radius: 6px; background: #2a2a2a; color: white; font-size: 16px; box-sizing: border-box;">
+            <input type="text" id="signupName" placeholder="John Smith" required maxlength="75"
+                   style="width: 100%; padding: 14px; border: 1px solid #555; border-radius: 6px; background: #2a2a2a; color: white; font-size: 16px; box-sizing: border-box;"
+                   oninput="validateSignupName(this)">
           </div>
           
           <div>

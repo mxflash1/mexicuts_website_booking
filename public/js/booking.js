@@ -25,7 +25,8 @@ function recordBookingTimestamp() {
   localStorage.setItem('mexicuts_last_booking', new Date().toISOString());
 }
 
-// Returns true (and shows a message) if this device booked within the last 10 minutes.
+// Returns true (and shows a message) if this guest device booked within the last 10 minutes.
+// Logged-in users bypass this check entirely — they can book for multiple people.
 function isRateLimitedLocally() {
   const ts = localStorage.getItem('mexicuts_last_booking');
   if (!ts) return false;
@@ -34,7 +35,7 @@ function isRateLimitedLocally() {
   if (elapsed < TEN_MIN) {
     const minsLeft = Math.ceil((TEN_MIN - elapsed) / 60000);
     const plural = minsLeft === 1 ? 'minute' : 'minutes';
-    showPopup(`⏳ Please wait ${minsLeft} more ${plural} before making another booking. To avoid this, delete your current booking.`);
+    showPopup(`⏳ Please wait ${minsLeft} more ${plural} before making another booking. To avoid this, make an account.`);
     return true;
   }
   return false;
@@ -103,6 +104,8 @@ async function createGuestBooking(data) {
       phone: data.phone,
       timeSlot: data.timeSlot,
       notes: data.notes || '',
+      service: data.service || '',
+      price: data.price || 20,
       deviceId: getOrCreateDeviceId()
     })
   });
@@ -313,6 +316,20 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
+  // Add name validation to the name input field
+  const nameInput = form.querySelector('input[placeholder="Full Name"]');
+  if (nameInput) {
+    nameInput.setAttribute('maxlength', NAME_MAX);
+    nameInput.addEventListener('input', function() {
+      const v = validateName(this.value);
+      if (!v.isValid) showNameError(v.message); else removeNameError();
+    });
+    nameInput.addEventListener('blur', function() {
+      const v = validateName(this.value);
+      if (!v.isValid) showNameError(v.message);
+    });
+  }
+
   // Add phone number validation to the phone input field
   const phoneInput = form.querySelector('input[placeholder="Phone Number"]');
   if (phoneInput) {
@@ -343,6 +360,17 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
+  // ── Service selector click handlers ──────────────────────────────────────
+  document.querySelectorAll('.service-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.service-btn').forEach(b => b.classList.remove('service-selected'));
+      btn.classList.add('service-selected');
+      document.getElementById('selectedServiceHidden').value = btn.dataset.service;
+      document.getElementById('selectedPriceHidden').value = btn.dataset.price;
+    });
+  });
+  // ─────────────────────────────────────────────────────────────────────────
+
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
 
@@ -351,6 +379,23 @@ document.addEventListener("DOMContentLoaded", async () => {
     const notes = form.querySelector('textarea').value;
     const timeSlotField = document.getElementById("timeSlotHidden");
     const timeSlot = timeSlotField ? timeSlotField.value : "";
+    const service = (document.getElementById("selectedServiceHidden") || {}).value || "";
+    const price = (document.getElementById("selectedPriceHidden") || {}).value || "";
+
+    // Validate name
+    const nameValidation = validateName(name);
+    if (!nameValidation.isValid) {
+      showNameError(nameValidation.message);
+      return;
+    }
+    removeNameError();
+
+    // Require a service to be selected
+    if (!service) {
+      showPopup("⚠️ Please select a service (Fade, Trim, or Both) before booking.");
+      document.getElementById('serviceSelector').scrollIntoView({ behavior: 'smooth' });
+      return;
+    }
 
     // Require a selected date + time slot
     if (!timeSlot) {
@@ -373,17 +418,30 @@ document.addEventListener("DOMContentLoaded", async () => {
     // Remove any error messages if phone is valid
     removePhoneError();
 
-    // Layer 1: Device fingerprint check (client-side, 5-minute cooldown)
-    if (isRateLimitedLocally()) return;
+    // Layer 1: Device fingerprint check — guests only.
+    // Logged-in clients are rate-limited separately (server-side, up to 4 bookings per 10 min).
+    const isLoggedIn = authManager && authManager.isLoggedIn();
+    if (!isLoggedIn && isRateLimitedLocally()) return;
 
     const data = {
       name,
       phone,
       timeSlot,
       notes,
+      service,
+      price: Number(price),
       timestamp: new Date(),
       status: 'pending' // awaiting barber approval
     };
+
+    // Show loading state on submit button
+    const submitBtn = form.querySelector('button[type="submit"]');
+    const originalBtnText = submitBtn ? submitBtn.textContent : '';
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = '⏳ Booking...';
+      submitBtn.style.opacity = '0.7';
+    }
 
     try {
       // If logged in, create booking directly (rules require userId match).
@@ -392,7 +450,33 @@ document.addEventListener("DOMContentLoaded", async () => {
         const currentUser = authManager.getCurrentUser();
         if (currentUser) {
           data.userId = currentUser.uid;
-          console.log('Adding userId to booking:', currentUser.uid);
+
+          // Server-side rate limit for clients: max 4 bookings within 10 minutes.
+          // Filter by timestamp in JS to avoid needing a Firestore composite index.
+          const TEN_MIN_MS = 10 * 60 * 1000;
+          const TEN_MIN_AGO = new Date(Date.now() - TEN_MIN_MS);
+          const allUserSnap = await db.collection('bookings')
+            .where('userId', '==', currentUser.uid)
+            .get();
+          const recentDocs = allUserSnap.docs.filter(d => {
+            const ts = d.data().timestamp;
+            if (!ts) return false;
+            const t = ts.toDate ? ts.toDate() : new Date(ts);
+            return t > TEN_MIN_AGO;
+          });
+          if (recentDocs.length >= 4) {
+            const timestamps = recentDocs
+              .map(d => d.data().timestamp)
+              .map(t => (t.toDate ? t.toDate() : new Date(t)));
+            timestamps.sort((a, b) => a - b);
+            const oldest = timestamps[0];
+            const minsLeft = oldest
+              ? Math.ceil((TEN_MIN_MS - (Date.now() - oldest.getTime())) / 60000)
+              : 10;
+            const plural = minsLeft === 1 ? 'minute' : 'minutes';
+            showPopup(`⏳ Please wait ${minsLeft} more ${plural} before making another booking.`);
+            return;
+          }
         }
         await db.collection("bookings").add(data);
       } else {
@@ -402,25 +486,20 @@ document.addEventListener("DOMContentLoaded", async () => {
       // Update user's booking count if logged in
       if (data.userId) {
         try {
-          // Get current booking count
           const userBookingsSnapshot = await db.collection('bookings')
             .where('userId', '==', data.userId)
             .get();
-          
           const newBookingCount = userBookingsSnapshot.size;
-          
-          // Update user document
           await db.collection('users').doc(data.userId).update({
             bookingCount: newBookingCount
           });
-          
           console.log(`✅ Updated booking count: ${newBookingCount}`);
         } catch (countError) {
           console.error('Error updating booking count:', countError);
         }
       }
       
-      recordBookingTimestamp(); // start 5-minute cooldown on this device
+      recordBookingTimestamp(); // start 10-minute cooldown on this device
       confetti();
       showPopup("✅ Booking Confirmed!");
       
@@ -429,9 +508,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       
       // Refresh user bookings if logged in
       if (authManager && authManager.isLoggedIn() && window.refreshUserBookings) {
-        setTimeout(() => {
-          window.refreshUserBookings();
-        }, 1000);
+        setTimeout(() => window.refreshUserBookings(), 1000);
       }
       
       form.reset();
@@ -439,14 +516,18 @@ document.addEventListener("DOMContentLoaded", async () => {
       
       // Re-apply auto-fill if logged in (and not in guest mode)
       if (authManager && authManager.isLoggedIn() && !window.guestBookingMode) {
-        setTimeout(() => {
-          authManager.autoFillBookingForm();
-        }, 100);
+        setTimeout(() => authManager.autoFillBookingForm(), 100);
       }
     } catch (err) {
       console.error('Error saving booking:', err);
-      // Show the server's message (e.g. rate limit) if available, otherwise generic fallback
       showPopup(err.message && err.message !== 'Failed to fetch' ? err.message : 'Something went wrong. Please try again.');
+    } finally {
+      // Always restore the button regardless of success or error
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = originalBtnText;
+        submitBtn.style.opacity = '1';
+      }
     }
   });
   
@@ -519,7 +600,7 @@ function showCalendarOption(bookingData) {
       <h3 style="margin: 0 0 15px 0; color: #CE1126;">📅 Add to Calendar</h3>
       <p style="margin: 0 0 20px 0;">Would you like to add this appointment to your calendar?</p>
       <div style="display: flex; gap: 15px; justify-content: center;">
-        <button onclick="addToCalendar('${bookingData.timeSlot}', '${bookingData.name}')" 
+        <button onclick="addToCalendar('${bookingData.timeSlot}', '${bookingData.name}', '${bookingData.service || ''}', ${bookingData.price || 20})" 
                 style="background: #CE1126; color: white; border: none; padding: 12px 20px; border-radius: 6px; cursor: pointer; font-family: 'VT323', monospace; font-size: 16px;">
           ✅ Yes, Add to Calendar
         </button>
@@ -541,7 +622,7 @@ function closeCalendarOption() {
   }
 }
 
-function addToCalendar(timeSlot, customerName) {
+function addToCalendar(timeSlot, customerName, serviceLabel, servicePrice) {
   try {
     // Parse the time slot (format: "2024-01-15 03:30 PM")
     const parts = timeSlot.split(' ');
@@ -577,9 +658,11 @@ function addToCalendar(timeSlot, customerName) {
     const endTime = formatDate(endDate);
     
     // Create calendar event details
+    const svcName = serviceLabel || 'Haircut';
+    const svcPrice = servicePrice ? `$${servicePrice}` : '$20';
     const eventDetails = {
       title: 'Mexi Cuts - Haircut Appointment',
-      description: `Haircut appointment with Mexi Cuts\n\nService: Haircut\nPrice: $20\nLocation: 6 Rosella Tce, Peregian Springs, Sunshine Coast, QLD\nContact: 0402098123\nInstagram: @mexi_cuts\n\nPlease arrive 5 minutes early.`,
+      description: `Haircut appointment with Mexi Cuts\n\nService: ${svcName}\nPrice: ${svcPrice}\nLocation: 6 Rosella Tce, Peregian Springs, Sunshine Coast, QLD\nContact: 0402098123\nInstagram: @mexi_cuts\n\nPlease arrive 5 minutes early.`,
       location: '6 Rosella Tce, Peregian Springs, Sunshine Coast, QLD, Australia',
       startTime: startTime,
       endTime: endTime
@@ -670,6 +753,12 @@ function setupBookingLookup() {
       showPopup('Please enter your phone number.');
       return;
     }
+
+    // Show loading state on lookup button
+    const originalLookupText = lookupBtn.textContent;
+    lookupBtn.disabled = true;
+    lookupBtn.textContent = '⏳ Looking up...';
+    lookupBtn.style.opacity = '0.7';
     
     try {
       const baseUrl = getFunctionsBaseUrl();
@@ -738,6 +827,11 @@ function setupBookingLookup() {
     } catch (error) {
       console.error('Error looking up booking:', error);
       showPopup('Sorry, there was an error looking up your booking. Please try again.');
+    } finally {
+      // Always restore the lookup button
+      lookupBtn.disabled = false;
+      lookupBtn.textContent = originalLookupText;
+      lookupBtn.style.opacity = '1';
     }
   });
 }
@@ -861,6 +955,44 @@ function formatPhoneNumber(phone) {
 }
 
 // Phone number validation function
+// ── Name validation ───────────────────────────────────────────────────────
+const NAME_MAX = 75;
+// Allow letters (including accented), spaces, hyphens, apostrophes and periods.
+const NAME_REGEX = /^[a-zA-ZÀ-ÿ\s'\-.]+$/;
+
+function validateName(name) {
+  const trimmed = name.trim();
+  if (!trimmed) return { isValid: false, message: 'Name is required.' };
+  if (trimmed.length > NAME_MAX) return { isValid: false, message: `Name must be ${NAME_MAX} characters or fewer.` };
+  if (!NAME_REGEX.test(trimmed)) return { isValid: false, message: 'Name can only contain letters, spaces, hyphens, apostrophes and periods.' };
+  return { isValid: true };
+}
+
+function showNameError(message) {
+  removeNameError();
+  const errorDiv = document.createElement('div');
+  errorDiv.id = 'nameError';
+  errorDiv.style.cssText = `
+    color: #f44336;
+    font-size: 14px;
+    margin-top: 5px;
+    padding: 8px;
+    background: rgba(244, 67, 54, 0.1);
+    border: 1px solid #f44336;
+    border-radius: 4px;
+    font-family: 'VT323', monospace;
+  `;
+  errorDiv.textContent = message;
+  const nameInput = document.querySelector('input[placeholder="Full Name"]');
+  if (nameInput) nameInput.parentNode.insertBefore(errorDiv, nameInput.nextSibling);
+}
+
+function removeNameError() {
+  const existing = document.getElementById('nameError');
+  if (existing) existing.remove();
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 function validatePhoneNumber(phone) {
   // Remove all non-digit characters for validation
   const cleaned = phone.replace(/\D/g, '');

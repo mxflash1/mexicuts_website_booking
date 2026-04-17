@@ -159,8 +159,11 @@ document.addEventListener("DOMContentLoaded", function () {
           phone: data.phone,
           timeSlot: data.timeSlot,
           notes: data.notes || '',
+          service: data.service || '',
+          price: data.price || null,
           status: data.status || 'pending',
-          timestamp: data.timestamp
+          timestamp: data.timestamp,
+          lastRescheduleSms: data.lastRescheduleSms || null
         });
 
         // Only approved (or legacy with no status) go into the calendar view
@@ -193,6 +196,77 @@ document.addEventListener("DOMContentLoaded", function () {
 
     // Add availability background events
     addAvailabilityEvents(events, adminAvailability);
+
+    // Expose booking data globally so the search bar can access it
+    window.allBookingData = bookingData;
+
+    // ── Booking Search ────────────────────────────────────────────────────
+    const searchInput = document.getElementById('bookingSearch');
+    const searchResults = document.getElementById('bookingSearchResults');
+
+    if (searchInput && searchResults) {
+      searchInput.addEventListener('input', function () {
+        const query = this.value.trim().toLowerCase();
+
+        if (!query) {
+          searchResults.style.display = 'none';
+          searchResults.innerHTML = '';
+          return;
+        }
+
+        const matches = [];
+        window.allBookingData.forEach((booking, id) => {
+          const haystack = [
+            booking.name || '',
+            booking.phone || '',
+            booking.timeSlot || '',
+            booking.notes || ''
+          ].join(' ').toLowerCase();
+
+          if (haystack.includes(query)) {
+            matches.push({ id, ...booking });
+          }
+        });
+
+        if (matches.length === 0) {
+          searchResults.innerHTML = '<p style="color:#999; text-align:center; padding:12px;">No bookings found.</p>';
+          searchResults.style.display = 'block';
+          return;
+        }
+
+        // Sort by timeSlot descending (most recent first)
+        matches.sort((a, b) => (b.timeSlot || '').localeCompare(a.timeSlot || ''));
+
+        let html = `<p style="color:#777; font-size:12px; margin-bottom:8px;">${matches.length} result${matches.length === 1 ? '' : 's'} found</p>`;
+        matches.forEach(b => {
+          const statusColor = b.status === 'approved' ? '#4CAF50'
+                            : b.status === 'rejected' ? '#f44336'
+                            : '#FFC107';
+          const statusLabel = (b.status || 'approved').toUpperCase();
+          html += `
+            <div onclick="window.showBookingModal('${b.id}', window.allBookingData.get('${b.id}'))"
+                 style="background:#1a1a1a; border:1px solid #444; border-radius:8px; padding:12px 14px;
+                        margin-bottom:8px; cursor:pointer; transition:border-color 0.2s;"
+                 onmouseover="this.style.borderColor='#CE1126'"
+                 onmouseout="this.style.borderColor='#444'">
+              <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
+                <div style="flex:1; min-width:0;">
+                  <div style="color:white; font-weight:bold; font-size:15px;">${b.name || 'Unknown'}</div>
+                  <div style="color:#aaa; font-size:13px;">${b.phone || ''}</div>
+                  <div style="color:#ccc; font-size:13px; margin-top:2px;">📅 ${b.timeSlot || ''}</div>
+                  ${b.notes ? `<div style="color:#888; font-size:12px; margin-top:4px;">📝 ${b.notes}</div>` : ''}
+                </div>
+                <span style="color:${statusColor}; font-size:11px; font-weight:bold; flex-shrink:0;">${statusLabel}</span>
+              </div>
+            </div>
+          `;
+        });
+
+        searchResults.innerHTML = html;
+        searchResults.style.display = 'block';
+      });
+    }
+    // ─────────────────────────────────────────────────────────────────────
 
     const calendar = new FullCalendar.Calendar(calendarEl, {
       initialView: "timeGridWeek",
@@ -260,6 +334,7 @@ document.addEventListener("DOMContentLoaded", function () {
               <div style="color:#ccc; font-size:13px; margin-top:2px;">
                 ${data.timeSlot || ''}
               </div>
+              ${data.service ? `<div style="color:#a0cfff; font-size:12px; margin-top:2px;">✂️ ${data.service}${data.price ? ` — $${data.price}` : ''}</div>` : ''}
               <div style="color:${statusColor}; font-size:11px; margin-top:2px; font-weight:bold;">
                 ${statusLabel}
               </div>
@@ -291,6 +366,11 @@ document.addEventListener("DOMContentLoaded", function () {
   // Expose so Pending tab can call it
   window.loadPendingBookings = loadPendingBookings;
 
+  // Expose showBookingModal globally so search results can open it
+  window.showBookingModal = function(bookingId, booking) {
+    showBookingModal(bookingId, booking);
+  };
+
   // Show booking management modal
   function showBookingModal(bookingId, booking) {
     const modal = document.getElementById("bookingModal");
@@ -299,8 +379,42 @@ document.addEventListener("DOMContentLoaded", function () {
     // Populate form with booking data
     document.getElementById("editName").value = booking.name;
     document.getElementById("editPhone").value = booking.phone;
-    document.getElementById("editTimeSlot").value = booking.timeSlot;
     document.getElementById("editNotes").value = booking.notes;
+
+    // Populate unrestricted date + time pickers
+    const timeSelect = document.getElementById("editTimeSelect");
+    if (timeSelect && !timeSelect.dataset.populated) {
+      // Build a full day of 30-min slots (12:00 AM → 11:30 PM) so admin can pick any time
+      timeSelect.innerHTML = '';
+      for (let h = 0; h < 24; h++) {
+        for (let m of [0, 30]) {
+          const ampm = h < 12 ? 'AM' : 'PM';
+          const h12 = h % 12 === 0 ? 12 : h % 12;
+          const label = `${String(h12).padStart(2,'0')}:${m === 0 ? '00' : '30'} ${ampm}`;
+          const opt = document.createElement('option');
+          opt.value = label;
+          opt.textContent = label;
+          timeSelect.appendChild(opt);
+        }
+      }
+      timeSelect.dataset.populated = 'true';
+    }
+
+    // Pre-select the existing date and time from the stored timeSlot
+    if (booking.timeSlot) {
+      const tsParts = booking.timeSlot.split(' '); // ["2026-03-21", "08:00", "AM"]
+      if (tsParts.length >= 1) document.getElementById("editDate").value = tsParts[0];
+      if (tsParts.length >= 3 && timeSelect) timeSelect.value = `${tsParts[1]} ${tsParts[2]}`;
+    }
+    document.getElementById("editTimeSlot").value = booking.timeSlot || '';
+
+    const serviceLabelEl = document.getElementById("bookingServiceLabel");
+    if (serviceLabelEl) {
+      const svc = booking.service || '—';
+      const prc = booking.price ? ` ($${booking.price})` : '';
+      serviceLabelEl.textContent = svc + prc;
+    }
+
     const statusLabelEl = document.getElementById("bookingStatusLabel");
     if (statusLabelEl) {
       const status = booking.status || 'pending';
@@ -314,20 +428,73 @@ document.addEventListener("DOMContentLoaded", function () {
     // Handle form submission (update booking)
     form.onsubmit = async function(e) {
       e.preventDefault();
-      
+
+      const editDate = document.getElementById("editDate").value;
+      const editTimeVal = document.getElementById("editTimeSelect").value;
+      const newTimeSlot = editDate && editTimeVal ? `${editDate} ${editTimeVal}` : booking.timeSlot;
+      const oldTimeSlot = booking.timeSlot;
+
       const updatedData = {
         name: document.getElementById("editName").value,
         phone: document.getElementById("editPhone").value,
-        timeSlot: document.getElementById("editTimeSlot").value,
+        timeSlot: newTimeSlot,
         notes: document.getElementById("editNotes").value,
-        timestamp: booking.timestamp // Keep original timestamp
+        timestamp: booking.timestamp
       };
-      
+
       try {
         await window.db.collection("bookings").doc(bookingId).update(updatedData);
-        showStatusMessage("✅ Booking updated successfully!", "success");
+
+        // If the time changed, update bookedSlots and notify the client via SMS
+        if (newTimeSlot !== oldTimeSlot) {
+          // Remove old slot, add new slot
+          try {
+            const oldSlotId = oldTimeSlot.replace(/[\s:]/g, '_');
+            const newSlotId = newTimeSlot.replace(/[\s:]/g, '_');
+            await window.db.collection('bookedSlots').doc(oldSlotId).delete();
+            await window.db.collection('bookedSlots').doc(newSlotId).set({
+              timeSlot: newTimeSlot,
+              bookingId: bookingId,
+              createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+          } catch (slotErr) {
+            console.warn('Could not update bookedSlots:', slotErr);
+          }
+
+          // Send SMS to client
+          try {
+            const baseUrl = `https://us-central1-${firebaseConfig.projectId}.cloudfunctions.net`;
+            const smsResp = await fetch(`${baseUrl}/notifyReschedule`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                bookingId,
+                newTimeSlot,
+                phone: updatedData.phone,
+                name: updatedData.name
+              })
+            });
+            const smsResult = await smsResp.json().catch(() => ({}));
+            if (smsResp.ok && smsResult.success) {
+              // Record send time in Firestore so the modal can display it
+              await window.db.collection('bookings').doc(bookingId).update({
+                lastRescheduleSms: firebase.firestore.FieldValue.serverTimestamp()
+              });
+              showStatusMessage("✅ Booking updated & reschedule SMS sent!", "success");
+            } else {
+              console.warn('Reschedule SMS rejected by server:', smsResult);
+              showStatusMessage(`✅ Booking updated! ⚠️ SMS failed: ${smsResult.message || 'check Twilio logs'}`, "success");
+            }
+          } catch (smsErr) {
+            console.warn('Reschedule SMS network error (booking still saved):', smsErr);
+            showStatusMessage("✅ Booking updated! ⚠️ SMS could not be sent.", "success");
+          }
+        } else {
+          showStatusMessage("✅ Booking updated successfully!", "success");
+        }
+
         modal.style.display = "none";
-        setTimeout(() => location.reload(), 1000); // Refresh after showing success
+        setTimeout(() => location.reload(), 1200);
       } catch (error) {
         console.error("Error updating booking:", error);
         showStatusMessage("❌ Error updating booking. Please try again.", "error");
@@ -378,6 +545,68 @@ document.addEventListener("DOMContentLoaded", function () {
     document.getElementById("deleteBooking").onclick = function() {
       showDeleteConfirmation(booking.name, () => deleteBooking(bookingId));
     };
+
+    // ── Resend Reschedule SMS ────────────────────────────────────────────
+    const resendBtn = document.getElementById("resendSmsBtn");
+    const lastSmsLabel = document.getElementById("lastSmsSentLabel");
+
+    // Show last-sent timestamp if recorded
+    if (lastSmsLabel) {
+      if (booking.lastRescheduleSms) {
+        const sentAt = booking.lastRescheduleSms.toDate
+          ? booking.lastRescheduleSms.toDate()
+          : new Date(booking.lastRescheduleSms);
+        lastSmsLabel.textContent = `Last sent: ${sentAt.toLocaleString('en-AU')}`;
+      } else {
+        lastSmsLabel.textContent = 'Not yet sent';
+      }
+    }
+
+    if (resendBtn) {
+      resendBtn.onclick = async function () {
+        resendBtn.disabled = true;
+        resendBtn.textContent = '⏳ Sending...';
+        try {
+          const currentPhone = document.getElementById("editPhone").value;
+          const currentName  = document.getElementById("editName").value;
+          const currentDate  = document.getElementById("editDate").value;
+          const currentTime  = document.getElementById("editTimeSelect").value;
+          const currentSlot  = currentDate && currentTime
+            ? `${currentDate} ${currentTime}`
+            : booking.timeSlot;
+
+          const baseUrl = `https://us-central1-${firebaseConfig.projectId}.cloudfunctions.net`;
+          const resp = await fetch(`${baseUrl}/notifyReschedule`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              bookingId,
+              newTimeSlot: currentSlot,
+              phone: currentPhone,
+              name: currentName
+            })
+          });
+          const result = await resp.json().catch(() => ({}));
+
+          if (resp.ok && result.success) {
+            // Record the send time in Firestore
+            const sentNow = firebase.firestore.FieldValue.serverTimestamp();
+            await window.db.collection('bookings').doc(bookingId).update({ lastRescheduleSms: sentNow });
+            if (lastSmsLabel) lastSmsLabel.textContent = `Last sent: ${new Date().toLocaleString('en-AU')}`;
+            showStatusMessage('✅ Reschedule SMS sent!', 'success');
+          } else {
+            showStatusMessage(`❌ SMS failed: ${result.message || 'Unknown error'}`, 'error');
+          }
+        } catch (err) {
+          console.error('Resend SMS error:', err);
+          showStatusMessage('❌ SMS send failed. Check Twilio logs.', 'error');
+        } finally {
+          resendBtn.disabled = false;
+          resendBtn.textContent = '📱 Resend Reschedule SMS';
+        }
+      };
+    }
+    // ────────────────────────────────────────────────────────────────────
   }
 
   // Delete booking function
@@ -617,8 +846,11 @@ document.addEventListener("DOMContentLoaded", function () {
       phone: phone,
       timeSlot: timeSlot,
       notes: notes,
+      service: 'Fade',   // default; admin can edit afterwards via the booking modal
+      price: 20,
       timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-      status: 'approved' // admin-created bookings are confirmed
+      status: 'approved', // admin-created bookings are confirmed
+      adminCreated: true
     };
 
     // Add userId if user exists
@@ -627,7 +859,16 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     try {
-      await window.db.collection("bookings").add(bookingData);
+      const newBookingRef = window.db.collection("bookings").doc();
+      await newBookingRef.set(bookingData);
+
+      // Mark the slot as taken so the customer site shows it as unavailable
+      const slotId = timeSlot.replace(/[\s:]/g, '_');
+      await window.db.collection('bookedSlots').doc(slotId).set({
+        timeSlot: timeSlot,
+        bookingId: newBookingRef.id,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
       
       // Update user's booking count if linked to account
       if (userId) {

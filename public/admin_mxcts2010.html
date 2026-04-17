@@ -333,6 +333,15 @@
       <div style="text-align: center; margin-bottom: 20px;">
         <button id="addManualBookingBtn" class="btn btn-secondary">➕ Add Manual Booking</button>
       </div>
+
+      <!-- Booking Search -->
+      <div style="margin-bottom: 20px;">
+        <input type="text" id="bookingSearch"
+               placeholder="🔍 Search by name, phone, date, or notes..."
+               style="width:100%; padding:14px; border:1px solid #555; border-radius:8px; background:#333; color:white; font-size:16px;">
+        <div id="bookingSearchResults" style="display:none; margin-top:10px; max-height:400px; overflow-y:auto;"></div>
+      </div>
+
       <div id="calendar"></div>
     </div>
   </div>
@@ -458,6 +467,15 @@
     </div>
     </div>
     
+  <!-- Leaderboard Tab -->
+  <div id="leaderboard-tab" class="tab-content">
+    <div style="padding: 20px; max-width: 800px; margin: 0 auto;">
+      <h2 style="color: #CE1126; margin-bottom: 5px;">🏆 Full Leaderboard</h2>
+      <p style="color: #ccc; font-size: 14px; margin-bottom: 20px;">All ranked clients — ordered by how frequently they come in. Lower average weeks = higher rank.</p>
+      <div id="adminLeaderboardList" style="color:#999; text-align:center; padding:30px;">Loading...</div>
+    </div>
+  </div>
+
   <!-- Bottom Navigation -->
   <div class="bottom-nav">
     <button class="nav-item active" onclick="switchTab('calendar')">
@@ -479,6 +497,10 @@
     <button class="nav-item" onclick="switchTab('clients')">
       <span class="nav-icon">👥</span>
       Clients
+    </button>
+    <button class="nav-item" onclick="switchTab('leaderboard')">
+      <span class="nav-icon">🏆</span>
+      Board
     </button>
   </div>
 
@@ -520,8 +542,20 @@
       <form id="bookingForm" style="display: grid; gap: 15px;">
         <input type="text" id="editName" placeholder="Customer Name" required style="padding: 12px; border: 1px solid #555; border-radius: 6px; background: #1a1a1a; color: white;">
         <input type="tel" id="editPhone" placeholder="Phone Number" required style="padding: 12px; border: 1px solid #555; border-radius: 6px; background: #1a1a1a; color: white;">
-        <input type="text" id="editTimeSlot" placeholder="2025-08-23 2:00 PM" required style="padding: 12px; border: 1px solid #555; border-radius: 6px; background: #1a1a1a; color: white;">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+          <input type="date" id="editDate" required
+                 style="padding: 12px; border: 1px solid #555; border-radius: 6px; background: #1a1a1a; color: white;">
+          <select id="editTimeSelect"
+                  style="padding: 12px; border: 1px solid #555; border-radius: 6px; background: #1a1a1a; color: white;">
+          </select>
+        </div>
+        <!-- Hidden field keeps the combined timeSlot value for the JS handler -->
+        <input type="hidden" id="editTimeSlot">
         <textarea id="editNotes" rows="3" placeholder="Notes" style="padding: 12px; border: 1px solid #555; border-radius: 6px; background: #1a1a1a; color: white;"></textarea>
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 12px; background:#1a1a1a; border:1px solid #555; border-radius:6px;">
+          <span style="color:#ccc; font-size:13px;">Service:</span>
+          <span id="bookingServiceLabel" style="font-weight:bold; font-size:13px; color:#fff;">—</span>
+        </div>
         <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px;">
           <span style="color:#ccc; font-size:13px;">Status:</span>
           <span id="bookingStatusLabel" style="font-weight:bold; font-size:13px; color:#FFC107;">PENDING</span>
@@ -534,6 +568,13 @@
         <div style="display:flex; gap:10px; margin-top:5px;">
           <button type="button" id="approveBookingBtn" class="btn-secondary" style="flex:1; border:none;">✅ Accept</button>
           <button type="button" id="rejectBookingBtn" class="btn" style="flex:1; background:#555;">❌ Reject (keep record)</button>
+        </div>
+        <div style="margin-top:8px;">
+          <button type="button" id="resendSmsBtn"
+                  style="width:100%; background:#1a3a4a; color:#7ecfff; border:1px solid #3a6a8a; padding:10px; border-radius:6px; cursor:pointer; font-size:13px; font-family:'VT323',monospace;">
+            📱 Resend Reschedule SMS
+          </button>
+          <div id="lastSmsSentLabel" style="text-align:center; color:#666; font-size:11px; margin-top:4px; font-family:'VT323',monospace;"></div>
         </div>
       </form>
     </div>
@@ -643,12 +684,75 @@
 
       // Lazy-load pending data when opening Pending tab
       if (tabName === 'pending') {
-        if (window.loadPendingBookings) {
-          window.loadPendingBookings();
+        if (window.loadPendingBookings) window.loadPendingBookings();
+        if (window.loadPendingClients) window.loadPendingClients();
+      }
+
+      // Lazy-load full leaderboard when opening Leaderboard tab
+      if (tabName === 'leaderboard') {
+        loadAdminLeaderboard();
+      }
+    }
+
+    async function loadAdminLeaderboard() {
+      const container = document.getElementById('adminLeaderboardList');
+      if (!container) return;
+      if (!window.db) { container.innerHTML = '<p style="color:#f44336;">Database not ready. Please wait.</p>'; return; }
+
+      container.innerHTML = '<p style="color:#999; text-align:center; padding:30px;">⏳ Loading...</p>';
+
+      try {
+        // Load leaderboard and user phone numbers in parallel
+        const [lbSnap, usersSnap] = await Promise.all([
+          window.db.collection('leaderboardPublic').orderBy('position').limit(200).get(),
+          window.db.collection('users').get()
+        ]);
+
+        // Build userId → phone map so admin can see contact details
+        const phoneMap = {};
+        usersSnap.forEach(doc => {
+          const d = doc.data();
+          if (d.phone) phoneMap[doc.id] = d.phone;
+        });
+
+        if (lbSnap.empty) {
+          container.innerHTML = '<p style="color:#999; text-align:center; padding:30px;">No leaderboard data yet. Run "Rebuild Leaderboard" from the Hours tab.</p>';
+          return;
         }
-        if (window.loadPendingClients) {
-          window.loadPendingClients();
-        }
+
+        const medalColours = ['#FFD700', '#C0C0C0', '#CD7F32'];
+        let html = '';
+
+        lbSnap.forEach(doc => {
+          const d = doc.data();
+          const pos = d.position || 0;
+          const medal = pos <= 3 ? `<span style="font-size:20px;">${['🥇','🥈','🥉'][pos-1]}</span>` : `<span style="color:#888; font-size:15px; font-weight:bold;">#${pos}</span>`;
+          const rankColour = pos <= 3 ? medalColours[pos - 1] : '#ccc';
+          const lastVisit = d.lastVisit && d.lastVisit.toDate
+            ? d.lastVisit.toDate().toLocaleDateString('en-AU', { day:'numeric', month:'short', year:'numeric' })
+            : '—';
+          const phone = phoneMap[doc.id] || '—';
+          const avgWeeks = typeof d.averageWeeks === 'number' ? d.averageWeeks.toFixed(1) : '—';
+
+          html += `
+            <div style="display:flex; align-items:center; gap:14px; background:#1a1a1a; border:1px solid #333; border-radius:10px; padding:14px 16px; margin-bottom:10px;">
+              <div style="min-width:36px; text-align:center;">${medal}</div>
+              <div style="flex:1; min-width:0;">
+                <div style="color:${rankColour}; font-weight:bold; font-size:16px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${d.displayName || 'Unknown'}</div>
+                <div style="color:#888; font-size:12px; margin-top:2px;">📱 ${phone}</div>
+              </div>
+              <div style="text-align:right; flex-shrink:0;">
+                <div style="color:#4CAF50; font-weight:bold; font-size:15px;">${d.totalVisits || 0} visits</div>
+                <div style="color:#aaa; font-size:12px;">avg ${avgWeeks} wks</div>
+                <div style="color:#666; font-size:11px;">Last: ${lastVisit}</div>
+              </div>
+            </div>`;
+        });
+
+        container.innerHTML = html;
+      } catch (err) {
+        console.error('Error loading admin leaderboard:', err);
+        container.innerHTML = '<p style="color:#f44336; text-align:center;">❌ Error loading leaderboard.</p>';
       }
     }
   </script>

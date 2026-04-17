@@ -171,23 +171,38 @@ async function viewClientDetails(clientId) {
 
     const client = clientDoc.data();
 
-    // Get client's bookings
-    const bookingsSnapshot = await window.db.collection('bookings')
-      .where('userId', '==', clientId)
-      .get();
+    // Query by both userId AND phone to catch all bookings for this person
+    // (covers logged-in bookings, legacy bookings, and same-phone guest bookings).
+    const [byUserId, byPhone] = await Promise.all([
+      window.db.collection('bookings').where('userId', '==', clientId).get(),
+      client.phone
+        ? window.db.collection('bookings').where('phone', '==', client.phone).get()
+        : Promise.resolve({ docs: [] })
+    ]);
 
+    // Merge and deduplicate by document ID
+    const seen = new Set();
     const bookings = [];
-    bookingsSnapshot.forEach(doc => {
-      bookings.push({
-        id: doc.id,
-        ...doc.data()
-      });
+    [...byUserId.docs, ...byPhone.docs].forEach(doc => {
+      if (!seen.has(doc.id)) {
+        seen.add(doc.id);
+        bookings.push({ id: doc.id, ...doc.data() });
+      }
     });
 
     // Sort bookings by date
     bookings.sort((a, b) => {
       return new Date(b.timeSlot) - new Date(a.timeSlot);
     });
+
+    // Sync stored bookingCount to match live query so the card stays accurate
+    if ((client.bookingCount || 0) !== bookings.length) {
+      window.db.collection('users').doc(clientId).update({ bookingCount: bookings.length })
+        .catch(err => console.warn('Could not sync bookingCount:', err));
+      // Also update the local cache so the card reflects it immediately
+      const cached = allClients.find(c => c.id === clientId);
+      if (cached) cached.bookingCount = bookings.length;
+    }
 
     // Show modal with details
     showClientModal(client, bookings);
@@ -245,7 +260,7 @@ function showClientModal(client, bookings) {
         </div>
         <div style="background: #0a0a0a; padding: 12px; border-radius: 8px; margin-bottom: 10px;">
           <div style="color: #ccc; font-size: 14px; margin-bottom: 5px;">
-            <strong style="color: #006847;">Service:</strong> Haircut ($20)
+            <strong style="color: #006847;">Service:</strong> ${booking.service ? `${booking.service}${booking.price ? ` ($${booking.price})` : ''}` : 'Haircut ($20)'}
           </div>
           <div style="color: #ccc; font-size: 14px;">
             <strong style="color: #006847;">Location:</strong> Peregian Springs, Sunshine Coast
