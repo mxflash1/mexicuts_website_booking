@@ -22,6 +22,7 @@ const TWILIO_PHONE_NUMBER = defineSecret('TWILIO_PHONE_NUMBER');
 const GOOGLE_SHEETS_CREDENTIALS = defineSecret('GOOGLE_SHEETS_CREDENTIALS');
 const GOOGLE_SHEET_ID = defineSecret('GOOGLE_SHEET_ID');
 const PAYMENT_SHEET_ID = defineSecret('PAYMENT_SHEET_ID');
+const MANAGE_BOOKING_URL = 'https://mexicuts.au/#manage-booking';
 
 function createTransporter() {
   const user = process.env.GMAIL_USER;
@@ -128,6 +129,60 @@ function isAppointmentTomorrow(appointmentDate) {
   
   // Check if appointment is exactly 24 hours away (±15 minutes for function timing)
   return hoursDiff >= 23.75 && hoursDiff <= 24.25;
+}
+
+async function isConfiguredBookingSlot(db, timeSlot) {
+  const match = String(timeSlot || '').trim().match(/^(\d{4}-\d{2}-\d{2})\s+(\d{1,2}):(\d{2})\s+(AM|PM)$/i);
+  if (!match) return false;
+
+  const [, datePart, hourText, minuteText, periodText] = match;
+  const settingsDoc = await db.collection('settings').doc('availability').get();
+  const config = settingsDoc.exists ? settingsDoc.data() : {
+    businessHours: {
+      Saturday: { enabled: true, startTime: '08:00', endTime: '18:00', slotDuration: 30 },
+      Tuesday: { enabled: true, startTime: '15:30', endTime: '16:30', slotDuration: 30 },
+      Thursday: { enabled: true, startTime: '15:30', endTime: '16:30', slotDuration: 30 }
+    },
+    blockedDates: {},
+    blockedTimes: {}
+  };
+
+  if (config.blockedDates && config.blockedDates[datePart]) return false;
+
+  const weekday = new Date(`${datePart}T12:00:00+10:00`).toLocaleDateString('en-US', {
+    weekday: 'long',
+    timeZone: 'Australia/Brisbane'
+  });
+  const dayConfig = config.businessHours && config.businessHours[weekday];
+  if (!dayConfig || !dayConfig.enabled) return false;
+
+  const toMinutes = value => {
+    const [hours, minutes] = String(value).split(':').map(Number);
+    return hours * 60 + minutes;
+  };
+  let hours = Number(hourText);
+  const period = periodText.toUpperCase();
+  if (period === 'AM' && hours === 12) hours = 0;
+  if (period === 'PM' && hours !== 12) hours += 12;
+  const slotMinutes = hours * 60 + Number(minuteText);
+  const startMinutes = toMinutes(dayConfig.startTime);
+  let endMinutes = toMinutes(dayConfig.endTime);
+  if (endMinutes === 0 && dayConfig.endTime === '00:00') endMinutes = 1440;
+  const duration = Number(dayConfig.slotDuration) || 30;
+
+  if (slotMinutes < startMinutes || slotMinutes >= endMinutes || (slotMinutes - startMinutes) % duration !== 0) {
+    return false;
+  }
+
+  const blockedWindows = config.blockedTimes && Array.isArray(config.blockedTimes[datePart])
+    ? config.blockedTimes[datePart]
+    : [];
+  return !blockedWindows.some(window => {
+    const blockedStart = toMinutes(window.startTime || '00:00');
+    let blockedEnd = toMinutes(window.endTime || '00:00');
+    if (blockedEnd === 0 && window.endTime === '00:00') blockedEnd = 1440;
+    return slotMinutes >= blockedStart && slotMinutes < blockedEnd;
+  });
 }
 
 // Function to backup booking data to Google Sheets
@@ -260,7 +315,9 @@ async function handleBookingApproved(bookingData, bookingId) {
       // Extract time from timeSlot (format: "2025-08-23 05:30 PM")
       const [, timePart, ampm] = bookingData.timeSlot.split(' ');
       const time = `${timePart} ${ampm}`;
-      const smsMessage = `Mexi Cuts appointment confirmed\nDate: ${formattedDate}\nTime: ${time}\nService: Haircut ($20)\nLocation: 6 Rosella Tce, Peregian Springs\nMaps: https://maps.google.com/?q=6+Rosella+Tce,+Peregian+Springs,+Sunshine+Coast,+QLD,+Australia\nContact: 0402098123\nIG: @mexi_cuts\nArrive 5 min early. Cancel on the website. DO NOT REPLY`;
+      const service = bookingData.service || 'Haircut';
+      const price = bookingData.price || 20;
+      const smsMessage = `Mexi Cuts appointment confirmed\nDate: ${formattedDate}\nTime: ${time}\nService: ${service} ($${price})\nLocation: 6 Rosella Tce, Peregian Springs\nMaps: https://maps.google.com/?q=6+Rosella+Tce,+Peregian+Springs,+Sunshine+Coast,+QLD,+Australia\nReschedule or cancel: ${MANAGE_BOOKING_URL}\nContact: 0402098123\nDO NOT REPLY`;
 
       await client.messages.create({
         body: smsMessage,
@@ -318,6 +375,14 @@ exports.createGuestBooking = onRequest(
 
       if (typeof name !== 'string' || typeof phone !== 'string' || typeof timeSlot !== 'string') {
         res.status(400).json({ success: false, message: 'Invalid field types' });
+        return;
+      }
+
+      // Service is required and must be one of the allowed values
+      const ALLOWED_SERVICES = ['Fade', 'Trim', 'Fade + Trim'];
+      const trimmedService = typeof service === 'string' ? service.trim() : '';
+      if (!trimmedService || !ALLOWED_SERVICES.includes(trimmedService)) {
+        res.status(400).json({ success: false, message: 'Please select a service (Fade, Trim, or Both) before booking.' });
         return;
       }
 
@@ -427,7 +492,7 @@ exports.createGuestBooking = onRequest(
           phone: phone.trim(),
           timeSlot: timeSlot.trim(),
           notes: typeof notes === 'string' ? notes.trim() : '',
-          service: typeof service === 'string' && service.trim() ? service.trim() : 'Fade',
+          service: trimmedService,
           price: typeof price === 'number' && price > 0 ? price : 20,
           timestamp: admin.firestore.FieldValue.serverTimestamp(),
           guest: true,
@@ -484,6 +549,7 @@ exports.notifyReschedule = onRequest(
         `Hi ${name || 'there'}, your Mexi Cuts appointment has been rescheduled.\n` +
         `New date: ${formattedDate}\nNew time: ${time}\n` +
         `Location: 6 Rosella Tce, Peregian Springs\n` +
+        `Reschedule or cancel: ${MANAGE_BOOKING_URL}\n` +
         `Questions? Call/text 0402098123. DO NOT REPLY`;
 
       const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
@@ -552,13 +618,23 @@ exports.lookupBookingByPhone = onRequest(
       }
 
       // Only return safe fields — no internal IDs beyond bookingId, no userId
-      const bookings = snapshot.docs.map(doc => ({
-        bookingId: doc.id,
-        name: doc.data().name || '',
-        timeSlot: doc.data().timeSlot || '',
-        notes: doc.data().notes || '',
-        phone: doc.data().phone || ''
-      }));
+      const now = new Date();
+      const bookings = snapshot.docs
+        .filter(doc => {
+          const data = doc.data();
+          const appointmentDate = parseAppointmentTime(data.timeSlot);
+          return appointmentDate && !Number.isNaN(appointmentDate.getTime()) && appointmentDate > now && (data.status || 'pending') !== 'rejected';
+        })
+        .map(doc => ({
+          bookingId: doc.id,
+          name: doc.data().name || '',
+          timeSlot: doc.data().timeSlot || '',
+          notes: doc.data().notes || '',
+          phone: doc.data().phone || '',
+          service: doc.data().service || 'Haircut',
+          price: doc.data().price || 20,
+          status: doc.data().status || 'pending'
+        }));
 
       res.json({ success: true, bookings });
     } catch (err) {
@@ -624,6 +700,144 @@ exports.cancelGuestBooking = onRequest(
     } catch (err) {
       console.error('❌ cancelGuestBooking error:', err);
       res.status(500).json({ success: false, message: 'Failed to cancel booking' });
+    }
+  }
+);
+
+// Customer endpoint: move an upcoming booking to an available future slot.
+// Phone verification protects guest bookings; account bookings use the same
+// path so slot release/reservation is always atomic.
+exports.rescheduleBooking = onRequest(
+  {
+    region: 'us-central1',
+    invoker: 'public',
+    cors: true,
+    secrets: [TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER]
+  },
+  async (req, res) => {
+    res.set('Access-Control-Allow-Origin', '*');
+    res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Content-Type');
+
+    if (req.method === 'OPTIONS') {
+      res.status(204).send('');
+      return;
+    }
+
+    if (req.method !== 'POST') {
+      res.status(405).json({ success: false, message: 'Method not allowed' });
+      return;
+    }
+
+    try {
+      const { bookingId, phone, newTimeSlot } = req.body || {};
+      if (!bookingId || !phone || !newTimeSlot) {
+        res.status(400).json({ success: false, message: 'Missing booking, phone number, or new time' });
+        return;
+      }
+
+      const newAppointmentDate = parseAppointmentTime(newTimeSlot);
+      if (!newAppointmentDate || Number.isNaN(newAppointmentDate.getTime()) || newAppointmentDate <= new Date()) {
+        res.status(400).json({ success: false, message: 'Please choose a future appointment time' });
+        return;
+      }
+
+      const newSlotId = slotDocIdFromTimeSlot(newTimeSlot);
+      if (!newSlotId) {
+        res.status(400).json({ success: false, message: 'Invalid appointment time' });
+        return;
+      }
+
+      const db = admin.firestore();
+      if (!await isConfiguredBookingSlot(db, newTimeSlot)) {
+        res.status(400).json({ success: false, message: 'That appointment time is not available' });
+        return;
+      }
+      const bookingRef = db.collection('bookings').doc(String(bookingId));
+      const newSlotRef = db.collection('bookedSlots').doc(newSlotId);
+      const normalise = value => String(value || '').replace(/\D/g, '').replace(/^61/, '0');
+      let updatedBooking = null;
+
+      await db.runTransaction(async tx => {
+        const bookingDoc = await tx.get(bookingRef);
+        if (!bookingDoc.exists) throw new Error('BOOKING_NOT_FOUND');
+
+        const booking = bookingDoc.data();
+        if (normalise(booking.phone) !== normalise(phone)) throw new Error('PHONE_MISMATCH');
+
+        const oldAppointmentDate = parseAppointmentTime(booking.timeSlot);
+        if (!oldAppointmentDate || oldAppointmentDate <= new Date()) throw new Error('BOOKING_PASSED');
+        if (booking.timeSlot === newTimeSlot) throw new Error('SAME_SLOT');
+
+        const oldSlotId = slotDocIdFromTimeSlot(booking.timeSlot);
+        const oldSlotRef = oldSlotId ? db.collection('bookedSlots').doc(oldSlotId) : null;
+        const [newSlotDoc, oldSlotDoc] = await Promise.all([
+          tx.get(newSlotRef),
+          oldSlotRef ? tx.get(oldSlotRef) : Promise.resolve(null)
+        ]);
+        if (newSlotDoc.exists && newSlotDoc.data().bookingId !== bookingId) {
+          throw new Error('SLOT_TAKEN');
+        }
+
+        if (oldSlotRef && oldSlotDoc && oldSlotDoc.exists && oldSlotDoc.data().bookingId === bookingId) {
+          tx.delete(oldSlotRef);
+        }
+
+        tx.set(newSlotRef, {
+          timeSlot: newTimeSlot,
+          bookingId,
+          createdAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        tx.update(bookingRef, {
+          timeSlot: newTimeSlot,
+          reminderSent: false,
+          reminderSentAt: admin.firestore.FieldValue.delete(),
+          rescheduledAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        updatedBooking = { ...booking, timeSlot: newTimeSlot };
+      });
+
+      // Confirm the change by SMS. The booking stays rescheduled if Twilio is
+      // temporarily unavailable; the API reports smsSent so the UI can explain it.
+      let smsSent = false;
+      try {
+        const formattedDate = formatReadableDate(newTimeSlot);
+        const [, timePart, ampm] = newTimeSlot.split(' ');
+        const time = `${timePart} ${ampm}`;
+        const message =
+          `Hi ${updatedBooking.name || 'there'}, your Mexi Cuts appointment has been rescheduled.\n` +
+          `New date: ${formattedDate}\nNew time: ${time}\n` +
+          `Reschedule or cancel: ${MANAGE_BOOKING_URL}\n` +
+          `Questions? Call/text 0402098123. DO NOT REPLY`;
+        const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+        await client.messages.create({
+          body: message,
+          from: process.env.TWILIO_PHONE_NUMBER,
+          to: formatPhoneNumber(updatedBooking.phone)
+        });
+        smsSent = true;
+      } catch (smsError) {
+        console.error('Reschedule saved but confirmation SMS failed:', smsError.message);
+      }
+
+      res.json({ success: true, smsSent });
+    } catch (err) {
+      const knownErrors = {
+        BOOKING_NOT_FOUND: [404, 'Booking not found'],
+        PHONE_MISMATCH: [403, 'Phone number does not match this booking'],
+        BOOKING_PASSED: [409, 'Past appointments cannot be rescheduled'],
+        SAME_SLOT: [400, 'Please choose a different appointment time'],
+        SLOT_TAKEN: [409, 'That time was just booked. Please choose another.']
+      };
+      const known = knownErrors[err && err.message];
+      if (known) {
+        res.status(known[0]).json({ success: false, message: known[1] });
+        return;
+      }
+      console.error('rescheduleBooking error:', err);
+      res.status(500).json({ success: false, message: 'Failed to reschedule booking' });
     }
   }
 );
@@ -932,6 +1146,11 @@ exports.sendAppointmentReminders = onSchedule(
           console.log('⚠️ Incomplete booking - skipping');
           continue; // Skip incomplete bookings
         }
+
+        if ((booking.status || 'approved') !== 'approved') {
+          console.log('Appointment is not approved - skipping reminder');
+          continue;
+        }
         
         // Parse the appointment time
         const appointmentDate = parseAppointmentTime(booking.timeSlot);
@@ -962,7 +1181,9 @@ exports.sendAppointmentReminders = onSchedule(
             // Extract time from timeSlot (format: "2025-08-23 05:30 PM")
             const [, timePart, ampm] = booking.timeSlot.split(' ');
             const time = `${timePart} ${ampm}`;
-            const reminderMessage = `Mexi Cuts appointment tomorrow\nDate: ${formattedDate}\nTime: ${time}\nService: Haircut ($20)\nLocation: 6 Rosella Tce, Peregian Springs\nMaps: https://maps.google.com/?q=6+Rosella+Tce,+Peregian+Springs,+Sunshine+Coast,+QLD,+Australia\nContact: 0402098123\nIG: @mexi_cuts\nArrive 5 min early. Cancel on the website. DO NOT REPLY`;
+            const service = booking.service || 'Haircut';
+            const price = booking.price || 20;
+            const reminderMessage = `Mexi Cuts appointment tomorrow\nDate: ${formattedDate}\nTime: ${time}\nService: ${service} ($${price})\nLocation: 6 Rosella Tce, Peregian Springs\nMaps: https://maps.google.com/?q=6+Rosella+Tce,+Peregian+Springs,+Sunshine+Coast,+QLD,+Australia\nReschedule or cancel: ${MANAGE_BOOKING_URL}\nContact: 0402098123\nArrive 5 min early. DO NOT REPLY`;
             
             await client.messages.create({
               body: reminderMessage,
@@ -1203,6 +1424,17 @@ exports.testPaymentSheetAdd = onRequest(
   }
 );
 
+// Keep payment amounts numeric when writing to Google Sheets. Currency symbols
+// belong in the sheet's number format; including them in the value makes Sheets
+// store entries such as "$25" as text.
+function normalizePaymentAmount(value, fallback = 20) {
+  const amount = typeof value === 'number'
+    ? value
+    : Number(String(value ?? '').replace(/[^0-9.-]/g, ''));
+
+  return Number.isFinite(amount) && amount > 0 ? amount : fallback;
+}
+
 // Function to add completed haircut to Google Sheets (for payment tracking)
 async function addHaircutToPaymentSheet(bookingData, bookingId) {
   try {
@@ -1223,11 +1455,12 @@ async function addHaircutToPaymentSheet(bookingData, bookingId) {
 
     // Prepare row data matching your sheet structure
     // Columns: When Cut | When Paid | Who | Amount | Cash/Card
+    const amount = normalizePaymentAmount(bookingData.price);
     const rowData = [
       appointmentDate,           // When Cut (e.g., "28 October 2025")
       '',                        // When Paid (empty until confirmed)
       bookingData.name || '',    // Who
-      '$20',                     // Amount
+      amount,                    // Amount (numeric so Sheets can sum it; falls back to 20)
       ''                         // Cash/Card (empty until confirmed)
     ];
 
@@ -1484,19 +1717,21 @@ async function updatePaymentMethodInSheets(booking, paymentMethod) {
       return;
     }
     
-    // Update only the Cash/Card column (column E)
+    // Update Amount (D) + Cash/Card (E) in one shot so any admin price edit syncs.
+    const methodAmount = normalizePaymentAmount(booking.price);
     await sheets.spreadsheets.values.update({
       spreadsheetId: sheetId,
-      range: `E${rowIndex}`, // Only column E (Cash/Card)
+      range: `D${rowIndex}:E${rowIndex}`,
       valueInputOption: 'RAW',
       resource: {
         values: [[
+          methodAmount,
           paymentMethod === 'cash' ? 'Cash' : 'Card'
         ]]
       }
     });
-    
-    console.log(`✅ Updated payment method in sheets: ${booking.name} - ${paymentMethod}`);
+
+    console.log(`✅ Updated payment method in sheets: ${booking.name} - ${paymentMethod} - $${methodAmount}`);
   } catch (error) {
     console.error('❌ Error updating payment method in sheets:', error);
   }
@@ -1542,21 +1777,329 @@ async function updatePaymentDateInSheets(booking, paymentMethod, paymentDate) {
       return;
     }
     
-    // Update only the "When Paid" column (column B)
-    await sheets.spreadsheets.values.update({
+    // Update When Paid (B) and re-write Amount (D) so the latest price sticks
+    // even if it was adjusted between method-set and final confirm.
+    const confirmAmount = normalizePaymentAmount(booking.price);
+    await sheets.spreadsheets.values.batchUpdate({
       spreadsheetId: sheetId,
-      range: `B${rowIndex}`, // Only column B (When Paid)
-      valueInputOption: 'RAW',
       resource: {
-        values: [[paymentDate]]
+        valueInputOption: 'RAW',
+        data: [
+          { range: `B${rowIndex}`, values: [[paymentDate]] },
+          { range: `D${rowIndex}`, values: [[confirmAmount]] }
+        ]
       }
     });
-    
-    console.log(`✅ Updated payment date in sheets: ${booking.name} - ${paymentDate}`);
+
+    console.log(`✅ Updated payment date in sheets: ${booking.name} - ${paymentDate} - $${confirmAmount}`);
   } catch (error) {
     console.error('❌ Error updating payment date in sheets:', error);
   }
 }
+
+// List unsettled rows from the payment sheet (rows where When Paid (B) is empty).
+// Used by the admin Payments tab as a fallback when Firestore booking docs are
+// missing/orphaned but the sheet still has the row.
+exports.listSheetUnsettledRows = onRequest(
+  {
+    region: 'us-central1',
+    secrets: [GOOGLE_SHEETS_CREDENTIALS, PAYMENT_SHEET_ID],
+    invoker: 'public',
+    cors: true
+  },
+  async (req, res) => {
+    res.set('Access-Control-Allow-Origin', '*');
+    res.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
+
+    if (req.method === 'OPTIONS') {
+      res.status(204).send('');
+      return;
+    }
+
+    try {
+      const credentials = JSON.parse(process.env.GOOGLE_SHEETS_CREDENTIALS);
+      const sheetId = process.env.PAYMENT_SHEET_ID;
+      const auth = new google.auth.GoogleAuth({
+        credentials,
+        scopes: ['https://www.googleapis.com/auth/spreadsheets']
+      });
+      const sheets = google.sheets({ version: 'v4', auth });
+
+      const response = await sheets.spreadsheets.values.get({
+        spreadsheetId: sheetId,
+        range: 'A:E'
+      });
+
+      const rows = response.data.values || [];
+      const unsettled = [];
+      // Walk from bottom up so the most recent unsettled rows surface first.
+      for (let i = rows.length - 1; i >= 0; i--) {
+        const r = rows[i];
+        const whenCut = (r[0] || '').trim();
+        const whenPaid = (r[1] || '').trim();
+        const who = (r[2] || '').trim();
+        const amount = String(r[3] ?? '').trim();
+        const method = (r[4] || '').trim();
+        // Skip header row and blank rows
+        if (!whenCut || !who) continue;
+        if (whenCut.toLowerCase() === 'when cut') continue;
+        if (whenPaid) continue; // already settled
+        unsettled.push({
+          rowIndex: i + 1, // 1-based
+          whenCut,
+          who,
+          amount: amount || '$20',
+          method: method || ''
+        });
+      }
+
+      res.json({ success: true, rows: unsettled });
+    } catch (err) {
+      console.error('❌ listSheetUnsettledRows error:', err);
+      res.status(500).json({ success: false, message: err.message });
+    }
+  }
+);
+
+// Confirm a single sheet row by index — writes columns B (When Paid), D (Amount), E (Cash/Card).
+exports.confirmSheetRow = onRequest(
+  {
+    region: 'us-central1',
+    secrets: [GOOGLE_SHEETS_CREDENTIALS, PAYMENT_SHEET_ID],
+    invoker: 'public',
+    cors: true
+  },
+  async (req, res) => {
+    res.set('Access-Control-Allow-Origin', '*');
+    res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Content-Type');
+
+    if (req.method === 'OPTIONS') {
+      res.status(204).send('');
+      return;
+    }
+    if (req.method !== 'POST') {
+      res.status(405).send('Method not allowed');
+      return;
+    }
+
+    try {
+      const { rowIndex, paymentMethod, paymentDate, amount } = req.body || {};
+      const idx = parseInt(rowIndex, 10);
+      if (!idx || idx < 1) {
+        res.status(400).json({ success: false, message: 'Invalid rowIndex' });
+        return;
+      }
+      if (!['cash', 'card'].includes(String(paymentMethod || '').toLowerCase())) {
+        res.status(400).json({ success: false, message: 'paymentMethod must be cash or card' });
+        return;
+      }
+      if (!paymentDate || typeof paymentDate !== 'string') {
+        res.status(400).json({ success: false, message: 'Missing paymentDate' });
+        return;
+      }
+      const numericAmount = Number(amount);
+      if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+        res.status(400).json({ success: false, message: 'Invalid amount' });
+        return;
+      }
+
+      const credentials = JSON.parse(process.env.GOOGLE_SHEETS_CREDENTIALS);
+      const sheetId = process.env.PAYMENT_SHEET_ID;
+      const auth = new google.auth.GoogleAuth({
+        credentials,
+        scopes: ['https://www.googleapis.com/auth/spreadsheets']
+      });
+      const sheets = google.sheets({ version: 'v4', auth });
+
+      const methodLabel = paymentMethod.toLowerCase() === 'cash' ? 'Cash' : 'Card';
+
+      await sheets.spreadsheets.values.batchUpdate({
+        spreadsheetId: sheetId,
+        resource: {
+          valueInputOption: 'RAW',
+          data: [
+            { range: `B${idx}`, values: [[paymentDate]] },
+            { range: `D${idx}`, values: [[numericAmount]] },
+            { range: `E${idx}`, values: [[methodLabel]] }
+          ]
+        }
+      });
+
+      res.json({ success: true });
+    } catch (err) {
+      console.error('❌ confirmSheetRow error:', err);
+      res.status(500).json({ success: false, message: err.message });
+    }
+  }
+);
+
+// Delete a payment sheet row by its row index. Used by the admin Payments tab
+// to clear orphaned sheet rows that have no matching Firestore booking.
+exports.deletePaymentSheetRow = onRequest(
+  {
+    region: 'us-central1',
+    secrets: [GOOGLE_SHEETS_CREDENTIALS, PAYMENT_SHEET_ID],
+    invoker: 'public',
+    cors: true
+  },
+  async (req, res) => {
+    res.set('Access-Control-Allow-Origin', '*');
+    res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Content-Type');
+
+    if (req.method === 'OPTIONS') {
+      res.status(204).send('');
+      return;
+    }
+    if (req.method !== 'POST') {
+      res.status(405).send('Method not allowed');
+      return;
+    }
+
+    try {
+      const { rowIndex } = req.body || {};
+      const idx = parseInt(rowIndex, 10);
+      if (!idx || idx < 1) {
+        res.status(400).json({ success: false, message: 'Invalid rowIndex' });
+        return;
+      }
+
+      const credentials = JSON.parse(process.env.GOOGLE_SHEETS_CREDENTIALS);
+      const sheetId = process.env.PAYMENT_SHEET_ID;
+      const auth = new google.auth.GoogleAuth({
+        credentials,
+        scopes: ['https://www.googleapis.com/auth/spreadsheets']
+      });
+      const sheets = google.sheets({ version: 'v4', auth });
+
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId: sheetId,
+        resource: {
+          requests: [{
+            deleteDimension: {
+              range: {
+                sheetId: 0,
+                dimension: 'ROWS',
+                startIndex: idx - 1,
+                endIndex: idx
+              }
+            }
+          }]
+        }
+      });
+
+      res.json({ success: true });
+    } catch (err) {
+      console.error('❌ deletePaymentSheetRow error:', err);
+      res.status(500).json({ success: false, message: err.message });
+    }
+  }
+);
+
+// Delete a booking awaiting payment: removes the Firestore doc AND the
+// matching payment sheet row (matched by name + appointment date).
+exports.deletePaymentBooking = onRequest(
+  {
+    region: 'us-central1',
+    secrets: [GOOGLE_SHEETS_CREDENTIALS, PAYMENT_SHEET_ID],
+    invoker: 'public',
+    cors: true
+  },
+  async (req, res) => {
+    res.set('Access-Control-Allow-Origin', '*');
+    res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Content-Type');
+
+    if (req.method === 'OPTIONS') {
+      res.status(204).send('');
+      return;
+    }
+    if (req.method !== 'POST') {
+      res.status(405).send('Method not allowed');
+      return;
+    }
+
+    try {
+      const { bookingId } = req.body || {};
+      if (!bookingId || typeof bookingId !== 'string') {
+        res.status(400).json({ success: false, message: 'Missing bookingId' });
+        return;
+      }
+
+      const db = admin.firestore();
+      const bookingRef = db.collection('bookings').doc(bookingId);
+      const bookingDoc = await bookingRef.get();
+
+      let removedSheetRow = false;
+      if (bookingDoc.exists) {
+        const booking = bookingDoc.data();
+        if (booking && booking.timeSlot) {
+          try {
+            const credentials = JSON.parse(process.env.GOOGLE_SHEETS_CREDENTIALS);
+            const sheetId = process.env.PAYMENT_SHEET_ID;
+            const auth = new google.auth.GoogleAuth({
+              credentials,
+              scopes: ['https://www.googleapis.com/auth/spreadsheets']
+            });
+            const sheets = google.sheets({ version: 'v4', auth });
+
+            const [datePart] = booking.timeSlot.split(' ');
+            const [year, month, day] = datePart.split('-');
+            const appointmentDate = `${parseInt(day)} ${getMonthName(parseInt(month))} ${year}`;
+
+            const response = await sheets.spreadsheets.values.get({
+              spreadsheetId: sheetId,
+              range: 'A:E'
+            });
+            const rows = response.data.values || [];
+
+            // Walk bottom-up so the most recent matching row goes first.
+            for (let i = rows.length - 1; i >= 0; i--) {
+              if ((rows[i][0] || '').trim() === appointmentDate &&
+                  (rows[i][2] || '').trim() === (booking.name || '').trim()) {
+                await sheets.spreadsheets.batchUpdate({
+                  spreadsheetId: sheetId,
+                  resource: {
+                    requests: [{
+                      deleteDimension: {
+                        range: {
+                          sheetId: 0,
+                          dimension: 'ROWS',
+                          startIndex: i,
+                          endIndex: i + 1
+                        }
+                      }
+                    }]
+                  }
+                });
+                removedSheetRow = true;
+                break;
+              }
+            }
+          } catch (sheetErr) {
+            console.error('Sheet delete failed (continuing with Firestore delete):', sheetErr);
+          }
+        }
+
+        // Also delete the public bookedSlots mirror so the time slot opens up.
+        try {
+          const slotId = slotDocIdFromTimeSlot(booking.timeSlot);
+          if (slotId) await db.collection('bookedSlots').doc(slotId).delete();
+        } catch (slotErr) {
+          console.error('bookedSlots cleanup failed (continuing):', slotErr);
+        }
+
+        await bookingRef.delete();
+      }
+
+      res.json({ success: true, removedSheetRow, bookingDeleted: bookingDoc.exists });
+    } catch (err) {
+      console.error('❌ deletePaymentBooking error:', err);
+      res.status(500).json({ success: false, message: err.message });
+    }
+  }
+);
 
 // HTTP endpoint to clear all pending payments
 exports.clearAllPendingPayments = onRequest(
@@ -1685,7 +2228,9 @@ exports.updateUserFrequencyStats = onSchedule(
             const bookingDate = parseAppointmentTime(booking.timeSlot);
             if (bookingDate && bookingDate >= FEB_14_2026) {
               bookingsAfterFeb14.push(bookingDate);
-              completedBookingsAfterFeb14.push(bookingDate);
+              if (bookingDate <= now) {
+                completedBookingsAfterFeb14.push(bookingDate);
+              }
             }
           }
         });
@@ -2314,7 +2859,9 @@ exports.updateFrequencyStatsNow = onRequest(
             const bookingDate = parseAppointmentTime(booking.timeSlot);
             if (bookingDate && bookingDate >= FEB_14_2026) {
               bookingsAfterFeb14.push(bookingDate);
-              completedBookingsAfterFeb14.push(bookingDate);
+              if (bookingDate <= now) {
+                completedBookingsAfterFeb14.push(bookingDate);
+              }
             }
           }
         });

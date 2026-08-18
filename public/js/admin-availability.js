@@ -26,7 +26,8 @@ class AdminAvailabilityManager {
           Thursday: "Thursdays: 3:30pm – 4:30pm"
         }
       },
-      blockedDates: {} // Store blocked dates as { "2025-01-15": { reason: "Holiday", blockedAt: timestamp } }
+      blockedDates: {}, // Store blocked dates as { "2025-01-15": { reason: "Holiday", blockedAt: timestamp } }
+      blockedTimes: {} // Store blocked time windows as { "2025-01-15": [{ startTime: "10:00", endTime: "12:00", reason: "Lunch", blockedAt: ts }] }
     };
   }
 
@@ -39,6 +40,10 @@ class AdminAvailabilityManager {
         // Ensure blockedDates exists
         if (!this.config.blockedDates) {
           this.config.blockedDates = {};
+        }
+        // Ensure blockedTimes exists
+        if (!this.config.blockedTimes) {
+          this.config.blockedTimes = {};
         }
         console.log('Loaded config from Firebase:', this.config);
       } else {
@@ -74,150 +79,64 @@ class AdminAvailabilityManager {
     const timeOptions = this.generateTimeOptions();
     const durationOptions = [15, 30, 45, 60];
 
-    let formHTML = `
-      <div style="display: grid; grid-template-columns: 1fr; gap: 15px; max-width: 100%;">
-    `;
+    let formHTML = '';
 
     days.forEach(day => {
       const dayConfig = this.config.businessHours[day] || { enabled: false };
       const isEnabled = dayConfig.enabled;
-      
+
       formHTML += `
-        <div style="
-          border: 2px solid ${isEnabled ? '#CE1126' : '#555'}; 
-          padding: 15px; 
-          border-radius: 8px; 
-          background: ${isEnabled ? '#3a1a1a' : '#1a1a1a'};
-          transition: all 0.3s ease;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-        ">
-          <!-- Day Header -->
-          <div style="display: flex; align-items: center; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #444;">
-            <input type="checkbox" id="enabled-${day}" ${isEnabled ? 'checked' : ''} 
-                   style="
-                     margin-right: 12px; 
-                     transform: scale(1.3); 
-                     accent-color: #CE1126;
-                     cursor: pointer;
-                   ">
-            <label for="enabled-${day}" style="
-              font-weight: bold; 
-              font-size: 16px; 
-              color: ${isEnabled ? '#CE1126' : '#ccc'};
-              cursor: pointer;
-              user-select: none;
-            ">${day}</label>
-            <div style="margin-left: auto; font-size: 11px; color: ${isEnabled ? '#4CAF50' : '#999'};">
-              ${isEnabled ? '✅ OPEN' : '❌ CLOSED'}
-            </div>
+        <div class="day-card" data-day="${day}" data-open="${isEnabled}">
+          <div class="day-card__head">
+            <label class="switch">
+              <input type="checkbox" id="enabled-${day}" ${isEnabled ? 'checked' : ''} aria-label="${day} open">
+              <span class="switch__track"><span class="switch__thumb"></span></span>
+            </label>
+            <div class="day-card__name"><label for="enabled-${day}">${day}</label></div>
+            <div class="day-card__status" data-status>${isEnabled ? 'OPEN' : 'CLOSED'}</div>
           </div>
-          
-          <!-- Time Settings -->
-          <div id="times-${day}" style="display: ${isEnabled ? 'block' : 'none'};">
-            <div style="display: grid; gap: 15px;">
-              
-              <!-- Start Time -->
-              <div>
-                <label style="
-                  display: block; 
-                  margin-bottom: 6px; 
-                  font-size: 12px; 
-                  font-weight: 600;
-                  color: #ccc;
-                ">🕐 Start Time:</label>
-                <select id="start-${day}" style="
-                  width: 100%; 
-                  padding: 8px; 
-                  border: 1px solid #555;
-                  border-radius: 4px;
-                  font-size: 13px;
-                  background: #333;
-                  color: white;
-                  cursor: pointer;
-                ">
-                  ${timeOptions.map(time => 
+
+          <div id="times-${day}" class="day-card__body" data-hidden="${!isEnabled}">
+            <div class="field-row field-row--3">
+              <div class="field">
+                <label class="field__label" for="start-${day}">Start time</label>
+                <select id="start-${day}" class="select">
+                  ${timeOptions.map(time =>
                     `<option value="${time}" ${dayConfig.startTime === time ? 'selected' : ''}>${this.formatTimeForDisplay(time)}</option>`
                   ).join('')}
                 </select>
               </div>
-              
-              <!-- End Time -->
-              <div>
-                <label style="
-                  display: block; 
-                  margin-bottom: 6px; 
-                  font-size: 12px; 
-                  font-weight: 600;
-                  color: #ccc;
-                ">🕕 End Time:</label>
-                <select id="end-${day}" style="
-                  width: 100%; 
-                  padding: 8px; 
-                  border: 1px solid #555;
-                  border-radius: 4px;
-                  font-size: 13px;
-                  background: #333;
-                  color: white;
-                  cursor: pointer;
-                ">
-                  ${timeOptions.map(time => 
+              <div class="field">
+                <label class="field__label" for="end-${day}">End time</label>
+                <select id="end-${day}" class="select">
+                  ${timeOptions.map(time =>
                     `<option value="${time}" ${dayConfig.endTime === time ? 'selected' : ''}>${this.formatTimeForDisplay(time)}</option>`
                   ).join('')}
                 </select>
               </div>
-              
-              <!-- Slot Duration -->
-              <div>
-                <label style="
-                  display: block; 
-                  margin-bottom: 6px; 
-                  font-size: 12px; 
-                  font-weight: 600;
-                  color: #ccc;
-                ">⏱️ Appointment Length:</label>
-                <select id="duration-${day}" style="
-                  width: 100%; 
-                  padding: 8px; 
-                  border: 1px solid #555;
-                  border-radius: 4px;
-                  font-size: 13px;
-                  background: #333;
-                  color: white;
-                  cursor: pointer;
-                ">
-                  ${durationOptions.map(duration => 
-                    `<option value="${duration}" ${(dayConfig.slotDuration || 30) === duration ? 'selected' : ''}>${duration} minutes</option>`
+              <div class="field">
+                <label class="field__label" for="duration-${day}">Slot length</label>
+                <select id="duration-${day}" class="select">
+                  ${durationOptions.map(duration =>
+                    `<option value="${duration}" ${(dayConfig.slotDuration || 30) === duration ? 'selected' : ''}>${duration} min</option>`
                   ).join('')}
                 </select>
               </div>
-              
-              <!-- Preview -->
-              <div style="
-                background: #2a4a2a; 
-                padding: 8px; 
-                border-radius: 4px; 
-                border-left: 3px solid #4CAF50;
-                margin-top: 8px;
-              ">
-                <div style="font-size: 10px; color: #aaa; margin-bottom: 3px;">Preview:</div>
-                <div style="font-weight: bold; color: #4CAF50; font-size: 12px;" id="preview-${day}">
-                  ${isEnabled ? this.generatePreviewText(dayConfig) : 'Day is closed'}
-                </div>
-              </div>
-              
+            </div>
+
+            <div class="day-card__preview">
+              <span class="day-card__preview-label">Preview</span>
+              <span id="preview-${day}">${isEnabled ? this.generatePreviewText(dayConfig) : 'Day is closed'}</span>
             </div>
           </div>
-          
-          <!-- Closed Message -->
-          <div id="closed-${day}" style="display: ${isEnabled ? 'none' : 'block'}; text-align: center; color: #666; font-style: italic; padding: 15px;">
-            This day is currently closed.<br>
-            <small style="color: #888;">Check the box above to open for business.</small>
+
+          <div id="closed-${day}" class="day-card__closed" data-hidden="${isEnabled}" style="display:${isEnabled ? 'none' : 'block'};">
+            Closed. Toggle the switch to open this day for bookings.
           </div>
         </div>
       `;
     });
 
-    formHTML += '</div>';
     return formHTML;
   }
 
@@ -302,27 +221,24 @@ class AdminAvailabilityManager {
     
     days.forEach(day => {
       const checkbox = document.getElementById(`enabled-${day}`);
+      if (!checkbox) return;
       const timesDiv = document.getElementById(`times-${day}`);
       const closedDiv = document.getElementById(`closed-${day}`);
-      const dayContainer = checkbox.closest('div').closest('div');
-      const dayLabel = document.querySelector(`label[for="enabled-${day}"]`);
-      const statusDiv = dayContainer.querySelector('div[style*="margin-left: auto"]');
-      
+      const dayContainer = checkbox.closest('.day-card');
+      const statusDiv = dayContainer ? dayContainer.querySelector('[data-status]') : null;
+
       // Handle checkbox changes
       checkbox.addEventListener('change', () => {
         const isEnabled = checkbox.checked;
-        
-        // Toggle visibility
-        timesDiv.style.display = isEnabled ? 'block' : 'none';
-        closedDiv.style.display = isEnabled ? 'none' : 'block';
-        
-        // Update styling
-        dayContainer.style.border = `2px solid ${isEnabled ? '#CE1126' : '#555'}`;
-        dayContainer.style.background = isEnabled ? '#3a1a1a' : '#1a1a1a';
-        dayLabel.style.color = isEnabled ? '#CE1126' : '#ccc';
-        statusDiv.innerHTML = isEnabled ? '✅ OPEN' : '❌ CLOSED';
-        
-        // Update preview
+
+        if (timesDiv) timesDiv.setAttribute('data-hidden', String(!isEnabled));
+        if (closedDiv) {
+          closedDiv.setAttribute('data-hidden', String(isEnabled));
+          closedDiv.style.display = isEnabled ? 'none' : 'block';
+        }
+        if (dayContainer) dayContainer.setAttribute('data-open', String(isEnabled));
+        if (statusDiv) statusDiv.textContent = isEnabled ? 'OPEN' : 'CLOSED';
+
         this.updatePreview(day);
       });
       
@@ -343,30 +259,29 @@ class AdminAvailabilityManager {
     // Save button
     document.getElementById('save-availability').addEventListener('click', async () => {
       const statusDiv = document.getElementById('save-status');
-      statusDiv.innerHTML = '⏳ Saving...';
-      statusDiv.style.color = '#CE1126';
+      statusDiv.textContent = 'Saving…';
+      statusDiv.setAttribute('data-state', 'info');
 
       try {
         const newConfig = this.collectFormData();
         const success = await this.saveConfig(newConfig);
-        
+
         if (success) {
-          statusDiv.innerHTML = '✅ Saved successfully!';
-          statusDiv.style.color = 'green';
-          
-          // Clear status after 3 seconds
+          statusDiv.textContent = 'Saved';
+          statusDiv.setAttribute('data-state', 'success');
           setTimeout(() => {
-            statusDiv.innerHTML = '';
+            statusDiv.textContent = '';
+            statusDiv.removeAttribute('data-state');
           }, 3000);
         } else {
           throw new Error('Save failed');
         }
       } catch (error) {
-        statusDiv.innerHTML = '❌ Error saving changes';
-        statusDiv.style.color = 'red';
-              console.error('Save error:', error);
-    }
-  });
+        statusDiv.textContent = 'Couldn’t save changes. Please try again.';
+        statusDiv.setAttribute('data-state', 'error');
+        console.error('Save error:', error);
+      }
+    });
   }
 
   // Update preview text for a specific day
@@ -405,9 +320,10 @@ class AdminAvailabilityManager {
 
     if (dates.length === 0) {
       listContainer.innerHTML = `
-        <div style="text-align: center; color: #666; padding: 20px; font-style: italic;">
-          No blocked dates set.<br>
-          <small style="color: #888;">Add dates above to prevent bookings.</small>
+        <div class="empty-state">
+          <svg class="empty-state__icon"><use href="#i-ban"/></svg>
+          <div class="empty-state__title">No blocked dates</div>
+          <div class="empty-state__hint">Add a date above to take that day off.</div>
         </div>
       `;
       return;
@@ -417,37 +333,21 @@ class AdminAvailabilityManager {
     dates.forEach(dateStr => {
       const dateInfo = blockedDates[dateStr];
       const formattedDate = this.formatDateForDisplay(dateStr);
-      
+
       html += `
-        <div style="
-          background: #1a1a1a; 
-          border: 1px solid #555; 
-          border-radius: 6px; 
-          padding: 12px; 
-          margin-bottom: 8px;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-        ">
-          <div>
-            <div style="color: #f44336; font-weight: bold; font-size: 14px;">🚫 ${formattedDate}</div>
-            ${dateInfo.reason ? `<div style="color: #ccc; font-size: 12px; margin-top: 2px;">${dateInfo.reason}</div>` : ''}
+        <div class="list-card list-card--urgent">
+          <div class="list-card__row">
+            <div style="flex:1; min-width:0;">
+              <div class="list-card__title">
+                <svg width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" style="color: var(--mexi-red);"><use href="#i-ban"/></svg>
+                ${formattedDate}
+              </div>
+              ${dateInfo.reason ? `<div class="list-card__meta"><div class="list-card__meta-row text-tertiary">${dateInfo.reason}</div></div>` : ''}
+            </div>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="adminAvailability.removeBlockedDate('${dateStr}')">
+              Unblock
+            </button>
           </div>
-          <button onclick="adminAvailability.removeBlockedDate('${dateStr}')" 
-                  style="
-                    background: #666; 
-                    color: white; 
-                    border: none; 
-                    padding: 6px 10px; 
-                    border-radius: 4px; 
-                    cursor: pointer; 
-                    font-size: 11px;
-                    transition: background 0.2s;
-                  "
-                  onmouseover="this.style.background='#f44336'"
-                  onmouseout="this.style.background='#666'">
-            Remove
-          </button>
         </div>
       `;
     });
@@ -494,78 +394,49 @@ class AdminAvailabilityManager {
     const dateStr = dateInput.value.trim();
     const reason = reasonInput.value.trim();
 
-    if (!dateStr) {
-      statusDiv.innerHTML = '❌ Please select a date';
-      statusDiv.style.color = '#f44336';
-      setTimeout(() => { statusDiv.innerHTML = ''; }, 3000);
-      return;
-    }
+    const setStatus = (text, state) => {
+      statusDiv.textContent = text;
+      if (state) statusDiv.setAttribute('data-state', state); else statusDiv.removeAttribute('data-state');
+      setTimeout(() => { statusDiv.textContent = ''; statusDiv.removeAttribute('data-state'); }, 3000);
+    };
+
+    if (!dateStr) return setStatus('Please select a date.', 'error');
 
     // Check if date is in the past
     const selectedDate = new Date(dateStr);
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+    if (selectedDate < today) return setStatus('You can’t block dates in the past.', 'error');
 
-    if (selectedDate < today) {
-      statusDiv.innerHTML = '❌ Cannot block dates in the past';
-      statusDiv.style.color = '#f44336';
-      setTimeout(() => { statusDiv.innerHTML = ''; }, 3000);
-      return;
-    }
+    if (!this.config.blockedDates) this.config.blockedDates = {};
+    if (this.config.blockedDates[dateStr]) return setStatus('This date is already blocked.', 'error');
 
-    // Ensure blockedDates exists
-    if (!this.config.blockedDates) {
-      this.config.blockedDates = {};
-    }
-
-    // Check if date is already blocked
-    if (this.config.blockedDates[dateStr]) {
-      statusDiv.innerHTML = '❌ This date is already blocked';
-      statusDiv.style.color = '#f44336';
-      setTimeout(() => { statusDiv.innerHTML = ''; }, 3000);
-      return;
-    }
-
-    // Add to config
     this.config.blockedDates[dateStr] = {
       reason: reason || 'Blocked',
       blockedAt: new Date().toISOString()
     };
 
-    // Update UI
     this.renderBlockedDatesList();
-    
-    // Clear inputs
     dateInput.value = '';
     reasonInput.value = '';
-
-    // Show success message
-    statusDiv.innerHTML = '✅ Date blocked successfully!';
-    statusDiv.style.color = '#4CAF50';
-    setTimeout(() => { statusDiv.innerHTML = ''; }, 3000);
+    setStatus('Date blocked.', 'success');
   }
 
   // Remove a blocked date
   async removeBlockedDate(dateStr) {
     const statusDiv = document.getElementById('blocked-dates-status');
+    const setStatus = (text, state) => {
+      if (!statusDiv) return;
+      statusDiv.textContent = text;
+      if (state) statusDiv.setAttribute('data-state', state); else statusDiv.removeAttribute('data-state');
+      setTimeout(() => { statusDiv.textContent = ''; statusDiv.removeAttribute('data-state'); }, 3000);
+    };
 
-    if (!this.config.blockedDates[dateStr]) {
-      statusDiv.innerHTML = '❌ Date not found';
-      statusDiv.style.color = '#f44336';
-      setTimeout(() => { statusDiv.innerHTML = ''; }, 3000);
-      return;
-    }
+    if (!this.config.blockedDates[dateStr]) return setStatus('Date not found.', 'error');
 
-    // Remove from config
     delete this.config.blockedDates[dateStr];
-
-    // Update UI
     this.renderBlockedDatesList();
-
-    // Show success message
-    statusDiv.innerHTML = '✅ Date unblocked successfully!';
-    statusDiv.style.color = '#4CAF50';
-    setTimeout(() => { statusDiv.innerHTML = ''; }, 3000);
+    setStatus('Date unblocked.', 'success');
   }
 
   // Format date for display
@@ -587,6 +458,160 @@ class AdminAvailabilityManager {
   // Get all blocked dates
   getBlockedDates() {
     return Object.keys(this.config.blockedDates || {});
+  }
+
+  // ── Blocked time windows (per-date partial blocks) ──────────────────────
+  initializeBlockedTimes() {
+    this.renderBlockedTimesList();
+    this.setupBlockedTimesEventListeners();
+  }
+
+  renderBlockedTimesList() {
+    const listContainer = document.getElementById('blockedTimesList');
+    if (!listContainer) return;
+
+    const blockedTimes = this.config.blockedTimes || {};
+    const dates = Object.keys(blockedTimes).sort();
+
+    const hasAny = dates.some(d => Array.isArray(blockedTimes[d]) && blockedTimes[d].length > 0);
+    if (!hasAny) {
+      listContainer.innerHTML = `
+        <div class="empty-state">
+          <svg class="empty-state__icon"><use href="#i-clock-x"/></svg>
+          <div class="empty-state__title">No blocked time windows</div>
+          <div class="empty-state__hint">Use the form above to block part of a day.</div>
+        </div>
+      `;
+      return;
+    }
+
+    let html = '';
+    dates.forEach(dateStr => {
+      const windows = blockedTimes[dateStr] || [];
+      if (!Array.isArray(windows) || windows.length === 0) return;
+      const formattedDate = this.formatDateForDisplay(dateStr);
+      windows.forEach((win, idx) => {
+        const startDisplay = this.formatTimeForDisplay(win.startTime || '00:00');
+        const endDisplay = this.formatTimeForDisplay(win.endTime || '00:00');
+        html += `
+          <div class="list-card list-card--urgent">
+            <div class="list-card__row">
+              <div style="flex:1; min-width:0;">
+                <div class="list-card__title">
+                  <svg width="16" height="16" stroke="currentColor" stroke-width="2" fill="none" style="color: var(--mexi-red);"><use href="#i-clock-x"/></svg>
+                  ${formattedDate}
+                </div>
+                <div class="list-card__meta">
+                  <div class="list-card__meta-row">${startDisplay} – ${endDisplay}</div>
+                  ${win.reason ? `<div class="list-card__meta-row text-tertiary">${win.reason}</div>` : ''}
+                </div>
+              </div>
+              <button type="button" class="btn btn-ghost btn-sm" onclick="adminAvailability.removeBlockedTime('${dateStr}', ${idx})">
+                Unblock
+              </button>
+            </div>
+          </div>
+        `;
+      });
+    });
+
+    listContainer.innerHTML = html;
+  }
+
+  setupBlockedTimesEventListeners() {
+    const addBtn = document.getElementById('addBlockedTimeBtn');
+    if (addBtn) {
+      addBtn.addEventListener('click', () => this.addBlockedTime());
+    }
+  }
+
+  async addBlockedTime() {
+    const dateInput = document.getElementById('blockTimeDateInput');
+    const startInput = document.getElementById('blockTimeStartInput');
+    const endInput = document.getElementById('blockTimeEndInput');
+    const reasonInput = document.getElementById('blockTimeReasonInput');
+    const statusDiv = document.getElementById('blocked-times-status');
+
+    if (!dateInput || !startInput || !endInput || !statusDiv) return;
+
+    const dateStr = dateInput.value.trim();
+    const startTime = startInput.value.trim();
+    const endTime = endInput.value.trim();
+    const reason = reasonInput ? reasonInput.value.trim() : '';
+
+    const setStatus = (msg, state) => {
+      statusDiv.textContent = msg;
+      if (state) statusDiv.setAttribute('data-state', state); else statusDiv.removeAttribute('data-state');
+      setTimeout(() => { statusDiv.textContent = ''; statusDiv.removeAttribute('data-state'); }, 3000);
+    };
+
+    if (!dateStr) return setStatus('Please select a date.', 'error');
+    if (!startTime || !endTime) return setStatus('Please select both start and end times.', 'error');
+
+    const selectedDate = new Date(dateStr);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (selectedDate < today) return setStatus('You can’t block times in the past.', 'error');
+
+    const toMin = (t) => {
+      const [h, m] = t.split(':').map(Number);
+      return h * 60 + m;
+    };
+    const startMin = toMin(startTime);
+    const endMin = endTime === '00:00' ? 1440 : toMin(endTime);
+    if (endMin <= startMin) return setStatus('End time must be after start time.', 'error');
+
+    if (!this.config.blockedTimes) this.config.blockedTimes = {};
+    if (!Array.isArray(this.config.blockedTimes[dateStr])) {
+      this.config.blockedTimes[dateStr] = [];
+    }
+
+    const overlaps = this.config.blockedTimes[dateStr].some(w => {
+      const ws = toMin(w.startTime || '00:00');
+      const we = (w.endTime === '00:00') ? 1440 : toMin(w.endTime || '00:00');
+      return startMin < we && endMin > ws;
+    });
+    if (overlaps) return setStatus('This window overlaps an existing blocked time.', 'error');
+
+    this.config.blockedTimes[dateStr].push({
+      startTime,
+      endTime,
+      reason: reason || 'Blocked',
+      blockedAt: new Date().toISOString()
+    });
+
+    this.config.blockedTimes[dateStr].sort((a, b) =>
+      toMin(a.startTime) - toMin(b.startTime)
+    );
+
+    this.renderBlockedTimesList();
+
+    startInput.value = '';
+    endInput.value = '';
+    if (reasonInput) reasonInput.value = '';
+
+    setStatus('Time window blocked.', 'success');
+  }
+
+  async removeBlockedTime(dateStr, index) {
+    const statusDiv = document.getElementById('blocked-times-status');
+    const setStatus = (msg, state) => {
+      if (!statusDiv) return;
+      statusDiv.textContent = msg;
+      if (state) statusDiv.setAttribute('data-state', state); else statusDiv.removeAttribute('data-state');
+      setTimeout(() => { statusDiv.textContent = ''; statusDiv.removeAttribute('data-state'); }, 3000);
+    };
+
+    const list = this.config.blockedTimes && this.config.blockedTimes[dateStr];
+    if (!Array.isArray(list) || index < 0 || index >= list.length) {
+      return setStatus('Time window not found.', 'error');
+    }
+
+    list.splice(index, 1);
+    if (list.length === 0) delete this.config.blockedTimes[dateStr];
+
+    this.renderBlockedTimesList();
+    setStatus('Time window unblocked.', 'success');
   }
 }
 

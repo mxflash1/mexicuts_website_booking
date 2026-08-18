@@ -126,7 +126,7 @@
       </div>
       <!-- Service selector -->
       <div id="serviceSelector">
-        <p class="service-label">Select your service:</p>
+        <p class="service-label">Select your service: <span style="color:#CE1126;">*</span></p>
         <div id="serviceOptions">
           <button type="button" class="service-btn" data-service="Fade" data-price="20">
             <span class="service-name">Fade</span>
@@ -143,6 +143,9 @@
         </div>
         <input type="hidden" id="selectedServiceHidden" name="service" />
         <input type="hidden" id="selectedPriceHidden" name="price" />
+        <div id="serviceError" style="display:none; color:#f44336; font-size:13px; margin-top:8px; font-weight:600;">
+          ⚠️ Please pick a service before booking.
+        </div>
       </div>
 
       <textarea placeholder="Notes (optional)"></textarea>
@@ -156,10 +159,10 @@
     </div>
     
     <!-- Booking Lookup Section -->
-    <div style="margin-top: 40px; padding-top: 30px; border-top: 2px solid #333;">
+    <div id="manage-booking" style="margin-top: 40px; padding-top: 30px; border-top: 2px solid #333; scroll-margin-top: 20px;">
       <h3 style="color: #CE1126; text-align: center; margin-bottom: 20px;">🔍 Look Up Your Booking</h3>
       <p style="text-align: center; color: #ccc; margin-bottom: 20px; font-size: 14px;">
-        Already have a booking? Enter your phone number to view or cancel it.
+        Already have a booking? Enter your phone number to view, reschedule, or cancel it.
       </p>
       
       <div style="display: flex; gap: 10px; justify-content: center; align-items: center; flex-wrap: wrap;">
@@ -197,6 +200,31 @@
         <button id="cancelYesBtn" style="width: 100%; background: #CE1126; color: white; border: none; padding: 14px 20px; border-radius: 6px; cursor: pointer; font-size: clamp(13px, 3.5vw, 15px); font-weight: bold; font-family: 'VT323', monospace;">
           Yes, Cancel
         </button>
+      </div>
+    </div>
+  </div>
+
+  <div id="rescheduleModal" class="reschedule-modal" role="dialog" aria-modal="true" aria-labelledby="rescheduleModalTitle" aria-hidden="true">
+    <div class="reschedule-modal__panel">
+      <div class="reschedule-modal__header">
+        <div>
+          <p class="reschedule-modal__eyebrow">Change appointment</p>
+          <h2 id="rescheduleModalTitle">Choose a new time</h2>
+        </div>
+        <button type="button" id="closeRescheduleModalBtn" class="reschedule-modal__close" aria-label="Close reschedule window">&times;</button>
+      </div>
+      <p id="rescheduleModalCurrent" class="reschedule-modal__current"></p>
+      <div class="reschedule-modal__picker">
+        <label for="rescheduleDate">Select a date</label>
+        <input id="rescheduleDate" type="text" readonly placeholder="Choose a date" />
+        <div id="rescheduleTimeSlots" class="reschedule-time-slots" aria-live="polite">
+          <p class="reschedule-time-slots__hint">Choose a date to see available times.</p>
+        </div>
+      </div>
+      <div id="rescheduleModalError" class="reschedule-modal__error" role="alert" hidden></div>
+      <div class="reschedule-modal__actions">
+        <button type="button" id="keepCurrentBookingBtn" class="reschedule-modal__secondary">Keep current time</button>
+        <button type="button" id="confirmRescheduleBtn" class="reschedule-modal__primary" disabled>Confirm new time</button>
       </div>
     </div>
   </div>
@@ -334,14 +362,13 @@
 <script src="js/availability-utils.js"></script>
   <!-- Authentication system -->
   <script src="js/auth.js"></script>
-  <script src="js/user-bookings.js"></script>
+  <script src="js/user-bookings.js?v=5.1"></script>
   <script src="js/auth-ui.js"></script>
   <!-- Leaderboard system -->
   <script src="js/leaderboard.js"></script>
   <!-- Final JS file with calendar + Firebase logic -->
-  <script defer src="js/booking.js?v=5.0"></script>
+  <script defer src="js/booking.js?v=5.3"></script>
 <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
 
 </body>
 </html>
- 

@@ -20,38 +20,13 @@ document.addEventListener("DOMContentLoaded", function () {
     
     // Show user-friendly error message
     document.body.innerHTML = `
-      <div style="
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        height: 100vh;
-        background: #1a1a1a;
-        color: white;
-        font-family: Arial, sans-serif;
-        text-align: center;
-        padding: 20px;
-      ">
-        <div style="
-          background: #2a2a2a;
-          padding: 40px;
-          border-radius: 12px;
-          border: 2px solid #f44336;
-          max-width: 500px;
-        ">
-          <h2 style="color: #f44336; margin-bottom: 20px;">❌ Configuration Error</h2>
-          <p style="margin-bottom: 20px; line-height: 1.6;">
-            Unable to load admin panel configuration.<br>
-            Please check your Firebase setup.
+      <div style="display:flex; align-items:center; justify-content:center; min-height:100vh; background: var(--bg, #0E1014); color: var(--text, #F2F4F7); font-family: -apple-system, BlinkMacSystemFont, sans-serif; padding: 24px;">
+        <div style="background: var(--surface-1, #161A21); border:1px solid rgba(239,68,68,0.4); border-radius: 14px; padding: 32px; max-width: 440px; text-align:center;">
+          <h2 style="font-size: 20px; font-weight: 700; margin-bottom: 12px; color: #EF4444;">Configuration error</h2>
+          <p style="font-size: 14px; line-height: 1.55; color: #B4BCCB; margin-bottom: 20px;">
+            Couldn't load the admin panel configuration. Please check your Firebase setup and try again.
           </p>
-          <button onclick="location.reload()" style="
-            background: #CE1126;
-            color: white;
-            padding: 12px 24px;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 16px;
-          ">Retry</button>
+          <button onclick="location.reload()" style="background: #E63247; color: #fff; padding: 12px 24px; border: 0; border-radius: 10px; cursor: pointer; font-weight: 600; font-size: 15px;">Reload</button>
         </div>
       </div>
     `;
@@ -74,6 +49,9 @@ document.addEventListener("DOMContentLoaded", function () {
   
   // Initialize blocked dates management
   adminAvailability.initializeBlockedDates();
+
+  // Initialize blocked time-window management
+  adminAvailability.initializeBlockedTimes();
 
   const calendarEl = document.getElementById("calendar");
   const events = [];
@@ -116,7 +94,7 @@ document.addEventListener("DOMContentLoaded", function () {
         // Add open hours as background events
         const startTime = `${dateStr}T${dayConfig.startTime}:00`;
         const endTime = `${dateStr}T${dayConfig.endTime}:00`;
-        
+
         events.push({
           start: startTime,
           end: endTime,
@@ -126,6 +104,27 @@ document.addEventListener("DOMContentLoaded", function () {
         });
       }
     }
+
+    // Overlay blocked time windows (per-date partial blocks) so the admin
+    // calendar visually reflects what clients can't book.
+    const blockedTimes = availabilityManager.config.blockedTimes || {};
+    Object.keys(blockedTimes).forEach(dateStr => {
+      const windows = blockedTimes[dateStr];
+      if (!Array.isArray(windows)) return;
+      windows.forEach(win => {
+        if (!win || !win.startTime || !win.endTime) return;
+        const endTimeIso = win.endTime === '00:00'
+          ? `${dateStr}T23:59:59`
+          : `${dateStr}T${win.endTime}:00`;
+        events.push({
+          start: `${dateStr}T${win.startTime}:00`,
+          end: endTimeIso,
+          display: 'background',
+          color: '#4a1a1a', // Dark red — matches full-day blocks
+          title: `Blocked: ${win.reason || 'Unavailable'}`
+        });
+      });
+    });
   }
 
   // Load bookings and create events for calendar
@@ -229,7 +228,11 @@ document.addEventListener("DOMContentLoaded", function () {
         });
 
         if (matches.length === 0) {
-          searchResults.innerHTML = '<p style="color:#999; text-align:center; padding:12px;">No bookings found.</p>';
+          searchResults.innerHTML = `
+            <div class="empty-state" style="padding: var(--space-5);">
+              <div class="empty-state__title">No bookings found</div>
+              <div class="empty-state__hint">Try a different name, phone, or date.</div>
+            </div>`;
           searchResults.style.display = 'block';
           return;
         }
@@ -237,26 +240,28 @@ document.addEventListener("DOMContentLoaded", function () {
         // Sort by timeSlot descending (most recent first)
         matches.sort((a, b) => (b.timeSlot || '').localeCompare(a.timeSlot || ''));
 
-        let html = `<p style="color:#777; font-size:12px; margin-bottom:8px;">${matches.length} result${matches.length === 1 ? '' : 's'} found</p>`;
+        let html = `<p class="text-tertiary" style="font-size: var(--text-xs); margin-bottom: var(--space-2); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600;">${matches.length} result${matches.length === 1 ? '' : 's'}</p>`;
         matches.forEach(b => {
-          const statusColor = b.status === 'approved' ? '#4CAF50'
-                            : b.status === 'rejected' ? '#f44336'
-                            : '#FFC107';
-          const statusLabel = (b.status || 'approved').toUpperCase();
+          const status = (b.status || 'approved');
+          const badgeClass = status === 'approved' ? 'badge--success'
+                          : status === 'rejected' ? 'badge--danger'
+                          : 'badge--warning';
           html += `
-            <div onclick="window.showBookingModal('${b.id}', window.allBookingData.get('${b.id}'))"
-                 style="background:#1a1a1a; border:1px solid #444; border-radius:8px; padding:12px 14px;
-                        margin-bottom:8px; cursor:pointer; transition:border-color 0.2s;"
-                 onmouseover="this.style.borderColor='#CE1126'"
-                 onmouseout="this.style.borderColor='#444'">
-              <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
+            <div class="list-card" role="button" tabindex="0" style="cursor: pointer;"
+                 onclick="window.showBookingModal('${b.id}', window.allBookingData.get('${b.id}'))"
+                 onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault(); window.showBookingModal('${b.id}', window.allBookingData.get('${b.id}'));}">
+              <div class="list-card__row">
                 <div style="flex:1; min-width:0;">
-                  <div style="color:white; font-weight:bold; font-size:15px;">${b.name || 'Unknown'}</div>
-                  <div style="color:#aaa; font-size:13px;">${b.phone || ''}</div>
-                  <div style="color:#ccc; font-size:13px; margin-top:2px;">📅 ${b.timeSlot || ''}</div>
-                  ${b.notes ? `<div style="color:#888; font-size:12px; margin-top:4px;">📝 ${b.notes}</div>` : ''}
+                  <div class="list-card__title">
+                    ${(b.name || 'Unknown').replace(/</g,'&lt;')}
+                    <span class="badge ${badgeClass}">${status}</span>
+                  </div>
+                  <div class="list-card__meta">
+                    <div class="list-card__meta-row"><svg><use href="#i-phone"/></svg>${b.phone || ''}</div>
+                    <div class="list-card__meta-row"><svg><use href="#i-calendar"/></svg>${b.timeSlot || ''}</div>
+                    ${b.notes ? `<div class="list-card__meta-row text-tertiary">"${(b.notes || '').replace(/</g,'&lt;')}"</div>` : ''}
+                  </div>
                 </div>
-                <span style="color:${statusColor}; font-size:11px; font-weight:bold; flex-shrink:0;">${statusLabel}</span>
               </div>
             </div>
           `;
@@ -268,22 +273,65 @@ document.addEventListener("DOMContentLoaded", function () {
     }
     // ─────────────────────────────────────────────────────────────────────
 
+    // Find the next day with at least one booking (today or later)
+    const todayMidnight = new Date();
+    todayMidnight.setHours(0, 0, 0, 0);
+    const futureBookingStarts = events
+      .filter(e => e.id && e.start)
+      .map(e => (e.start instanceof Date ? e.start : new Date(e.start)))
+      .filter(d => !isNaN(d) && d >= todayMidnight)
+      .sort((a, b) => a - b);
+    const initialDate = futureBookingStarts.length > 0 ? futureBookingStarts[0] : new Date();
+
+    const calendarShell = document.querySelector('.calendar-shell');
+    const computeCalendarHeight = () => {
+      const shell = document.querySelector('.calendar-shell');
+      if (shell && shell.clientHeight > 100) return shell.clientHeight - 24;
+      // Fallback: full viewport minus chrome
+      return Math.max(400, window.innerHeight - 220);
+    };
+
     const calendar = new FullCalendar.Calendar(calendarEl, {
-      initialView: "timeGridWeek",
+      initialView: "timeGridDay",
+      initialDate: initialDate,
       slotDuration: "00:30:00",
       slotLabelInterval: "01:00",
-      slotMinTime: "00:00:00",
-      slotMaxTime: "24:00:00",
+      slotMinTime: "07:00:00",
+      slotMaxTime: "19:00:00",
       events: events,
       themeSystem: "standard",
-      height: "auto",
+      height: computeCalendarHeight(),
+      nowIndicator: true,
+      allDaySlot: false,
+      expandRows: true,
+      slotEventOverlap: false,
+      displayEventEnd: false,
+      eventDisplay: "block",
+      eventTimeFormat: { hour: 'numeric', minute: '2-digit', meridiem: 'short' },
+      slotLabelFormat: { hour: 'numeric', meridiem: 'short' },
       headerToolbar: {
         left: 'prev,next today',
         center: 'title',
-        right: 'timeGridWeek,timeGridDay'
+        right: 'timeGridDay,timeGridWeek'
+      },
+      eventContent: function(arg) {
+        if (arg.event.display === 'background' || arg.event.display === 'inverse-background') {
+          return { html: `<div class="fc-bg-label">${(arg.event.title || '').replace(/</g,'&lt;')}</div>` };
+        }
+        const name = arg.event.extendedProps.customerName || arg.event.title || 'Booking';
+        const phone = arg.event.extendedProps.customerPhone || '';
+        const time = arg.timeText || '';
+        return {
+          html: `
+            <div class="fc-booking">
+              <div class="fc-booking__time">${time}</div>
+              <div class="fc-booking__name">${name.replace(/</g,'&lt;')}</div>
+              ${phone ? `<div class="fc-booking__phone">${phone}</div>` : ''}
+            </div>
+          `
+        };
       },
       eventClick: function(info) {
-        // Only handle booking events (not background availability events)
         if (info.event.extendedProps.bookingId) {
           showBookingModal(info.event.extendedProps.bookingId, bookingData.get(info.event.extendedProps.bookingId));
         }
@@ -291,6 +339,25 @@ document.addEventListener("DOMContentLoaded", function () {
     });
 
     calendar.render();
+
+    // Keep the calendar matched to the available viewport space
+    let resizeTimer = null;
+    const refit = () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        calendar.setOption('height', computeCalendarHeight());
+        calendar.updateSize();
+      }, 80);
+    };
+    window.addEventListener('resize', refit);
+    window.addEventListener('orientationchange', refit);
+
+    // When user switches back to the Bookings tab, ask FC to recompute (it may
+    // have rendered while hidden and got a 0-height container).
+    window.refitAdminCalendar = refit;
+
+    // Initial fit after layout settles
+    requestAnimationFrame(refit);
   }).catch(error => {
     console.error("Error fetching approved bookings:", error);
   });
@@ -309,9 +376,11 @@ document.addEventListener("DOMContentLoaded", function () {
 
       if (snapshot.empty) {
         container.innerHTML = `
-          <p style="text-align:center; color:#999; padding:10px;">
-            No pending bookings right now.
-          </p>
+          <div class="empty-state">
+            <svg class="empty-state__icon"><use href="#i-check"/></svg>
+            <div class="empty-state__title">All caught up</div>
+            <div class="empty-state__hint">No pending bookings right now.</div>
+          </div>
         `;
         return;
       }
@@ -321,37 +390,28 @@ document.addEventListener("DOMContentLoaded", function () {
         const data = doc.data();
         const id = doc.id;
         const status = data.status || 'pending';
-        const statusLabel = status.toUpperCase();
-        const statusColor = status === 'approved' ? '#4CAF50'
-                            : status === 'rejected' ? '#f44336'
-                            : '#FFC107';
+        const variantClass = status === 'rejected' ? 'list-card--muted' : 'list-card--warning';
+        const badgeClass = status === 'rejected' ? 'badge--danger' : 'badge--warning';
+        const safeName = (data.name || 'Unknown').replace(/</g, '&lt;');
         html += `
-          <div style="background:#1a1a1a; border:1px solid #555; border-radius:8px; padding:12px 14px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center; gap:10px;">
-            <div style="flex:1; min-width:0;">
-              <div style="color:white; font-weight:bold; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-                ${data.name || 'Unknown'} (${data.phone || 'N/A'})
-              </div>
-              <div style="color:#ccc; font-size:13px; margin-top:2px;">
-                ${data.timeSlot || ''}
-              </div>
-              ${data.service ? `<div style="color:#a0cfff; font-size:12px; margin-top:2px;">✂️ ${data.service}${data.price ? ` — $${data.price}` : ''}</div>` : ''}
-              <div style="color:${statusColor}; font-size:11px; margin-top:2px; font-weight:bold;">
-                ${statusLabel}
+          <div class="list-card ${variantClass}">
+            <div class="list-card__row">
+              <div style="flex:1; min-width:0;">
+                <div class="list-card__title">
+                  ${safeName}
+                  <span class="badge ${badgeClass}">${status}</span>
+                </div>
+                <div class="list-card__meta">
+                  <div class="list-card__meta-row"><svg><use href="#i-phone"/></svg>${data.phone || 'N/A'}</div>
+                  <div class="list-card__meta-row"><svg><use href="#i-calendar"/></svg>${data.timeSlot || '—'}</div>
+                  ${data.service ? `<div class="list-card__meta-row"><svg><use href="#i-scissors"/></svg>${data.service}${data.price ? ` · $${data.price}` : ''}</div>` : ''}
+                </div>
               </div>
             </div>
-            <div style="display:flex; gap:6px; flex-shrink:0;">
-              <button onclick="window.approvePendingBooking('${id}')" 
-                      style="background:#4CAF50; color:white; border:none; padding:6px 10px; border-radius:6px; font-size:12px; cursor:pointer;">
-                ✅ Accept
-              </button>
-              <button onclick="window.rejectPendingBooking('${id}')" 
-                      style="background:#f0ad4e; color:white; border:none; padding:6px 10px; border-radius:6px; font-size:12px; cursor:pointer;">
-                ❌ Reject
-              </button>
-              <button onclick="window.deletePendingBooking('${id}')" 
-                      style="background:#CE1126; color:white; border:none; padding:6px 10px; border-radius:6px; font-size:12px; cursor:pointer;">
-                🗑️ Delete
-              </button>
+            <div class="list-card__actions">
+              <button class="btn btn-success btn-sm" type="button" onclick="window.approvePendingBooking('${id}')">Accept</button>
+              <button class="btn btn-quiet btn-sm" type="button" onclick="window.rejectPendingBooking('${id}')">Reject</button>
+              <button class="btn btn-danger btn-sm" type="button" onclick="window.deletePendingBooking('${id}')">Delete</button>
             </div>
           </div>
         `;
@@ -360,6 +420,11 @@ document.addEventListener("DOMContentLoaded", function () {
       container.innerHTML = html;
     } catch (err) {
       console.error('Error loading pending bookings:', err);
+      container.innerHTML = `
+        <div class="empty-state">
+          <svg class="empty-state__icon"><use href="#i-info"/></svg>
+          <div class="empty-state__title">Couldn't load pending bookings</div>
+        </div>`;
     }
   }
 
@@ -384,13 +449,13 @@ document.addEventListener("DOMContentLoaded", function () {
     // Populate unrestricted date + time pickers
     const timeSelect = document.getElementById("editTimeSelect");
     if (timeSelect && !timeSelect.dataset.populated) {
-      // Build a full day of 30-min slots (12:00 AM → 11:30 PM) so admin can pick any time
+      // Build a full day of 15-min slots (12:00 AM → 11:45 PM) so admin can pick any time
       timeSelect.innerHTML = '';
       for (let h = 0; h < 24; h++) {
-        for (let m of [0, 30]) {
+        for (const m of [0, 15, 30, 45]) {
           const ampm = h < 12 ? 'AM' : 'PM';
           const h12 = h % 12 === 0 ? 12 : h % 12;
-          const label = `${String(h12).padStart(2,'0')}:${m === 0 ? '00' : '30'} ${ampm}`;
+          const label = `${String(h12).padStart(2,'0')}:${String(m).padStart(2,'0')} ${ampm}`;
           const opt = document.createElement('option');
           opt.value = label;
           opt.textContent = label;
@@ -441,6 +506,11 @@ document.addEventListener("DOMContentLoaded", function () {
         notes: document.getElementById("editNotes").value,
         timestamp: booking.timestamp
       };
+
+      if (newTimeSlot !== oldTimeSlot) {
+        updatedData.reminderSent = false;
+        updatedData.reminderSentAt = firebase.firestore.FieldValue.delete();
+      }
 
       try {
         await window.db.collection("bookings").doc(bookingId).update(updatedData);
@@ -777,6 +847,23 @@ document.addEventListener("DOMContentLoaded", function () {
   // MANUAL BOOKING FUNCTIONALITY
   // ===========================================================================
 
+  // Manual bookings can be placed on quarter-hour boundaries, independently
+  // of the customer-facing availability slot duration.
+  const manualTimeSelect = document.getElementById("manualTime");
+  manualTimeSelect.innerHTML = '<option value="">Select time…</option>';
+
+  for (let totalMinutes = 0; totalMinutes < 24 * 60; totalMinutes += 15) {
+    const hour24 = Math.floor(totalMinutes / 60);
+    const minute = totalMinutes % 60;
+    const period = hour24 >= 12 ? "PM" : "AM";
+    const hour12 = hour24 % 12 || 12;
+    const option = document.createElement("option");
+
+    option.value = `${String(hour12).padStart(2, "0")}:${String(minute).padStart(2, "0")} ${period}`;
+    option.textContent = `${hour12}:${String(minute).padStart(2, "0")} ${period}`;
+    manualTimeSelect.appendChild(option);
+  }
+
   // Open manual booking modal
   document.getElementById("addManualBookingBtn").onclick = function() {
     document.getElementById("manualBookingModal").style.display = "block";
@@ -947,4 +1034,4 @@ document.addEventListener("DOMContentLoaded", function () {
       startAdminPanel().catch(e => console.error('Admin panel init error (deferred):', e));
     };
   }
-}); 
+});

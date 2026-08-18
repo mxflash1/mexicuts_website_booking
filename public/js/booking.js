@@ -5,6 +5,7 @@ console.log('🚀 Booking.js v5.0 loaded - Authentication & user bookings enable
 // Firebase configuration will be loaded securely
 let firebaseConfig = null;
 let authManager = null;
+let rescheduleState = null;
 
 
 
@@ -82,6 +83,9 @@ let availabilityManager;
 let timeSlotsMap = {}; // Will be populated from config
 
 let bookedSlots = [];
+let reschedulePicker = null;
+let rescheduleSelectedTimeSlot = '';
+let rescheduleBodyOverflow = '';
 
 function getFunctionsBaseUrl() {
   // Public HTTPS functions endpoint
@@ -118,6 +122,187 @@ async function createGuestBooking(data) {
     throw err;
   }
   return payload;
+}
+
+async function submitBookingReschedule(newTimeSlot) {
+  const baseUrl = getFunctionsBaseUrl();
+  if (!baseUrl || !rescheduleState) throw new Error('Unable to reschedule this booking');
+
+  const response = await fetch(`${baseUrl}/rescheduleBooking`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      bookingId: rescheduleState.bookingId,
+      phone: rescheduleState.phone,
+      newTimeSlot
+    })
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload.success) {
+    throw new Error(payload.message || 'Reschedule failed');
+  }
+  return payload;
+}
+
+function startBookingReschedule(booking, phone) {
+  if (!booking || (!booking.id && !booking.bookingId)) return;
+
+  rescheduleState = {
+    bookingId: booking.id || booking.bookingId,
+    phone: phone || booking.phone,
+    oldTimeSlot: booking.timeSlot
+  };
+
+  const modal = document.getElementById('rescheduleModal');
+  const currentSlot = document.getElementById('rescheduleModalCurrent');
+  const slots = document.getElementById('rescheduleTimeSlots');
+  const confirmButton = document.getElementById('confirmRescheduleBtn');
+  const error = document.getElementById('rescheduleModalError');
+  if (!modal) return;
+
+  rescheduleBodyOverflow = document.body.style.overflow;
+  document.body.style.overflow = 'hidden';
+  modal.classList.add('is-open');
+  modal.setAttribute('aria-hidden', 'false');
+  initializeReschedulePicker();
+  rescheduleSelectedTimeSlot = '';
+  if (reschedulePicker) reschedulePicker.clear();
+  if (currentSlot) currentSlot.textContent = `Current appointment: ${booking.timeSlot}`;
+  if (slots) slots.innerHTML = '<p class="reschedule-time-slots__hint">Choose a date to see available times.</p>';
+  if (confirmButton) {
+    confirmButton.disabled = true;
+    confirmButton.textContent = 'Confirm new time';
+  }
+  if (error) {
+    error.hidden = true;
+    error.textContent = '';
+  }
+
+  setTimeout(() => document.getElementById('closeRescheduleModalBtn')?.focus(), 0);
+}
+
+function cancelBookingReschedule() {
+  rescheduleState = null;
+  rescheduleSelectedTimeSlot = '';
+  const modal = document.getElementById('rescheduleModal');
+  if (modal) {
+    modal.classList.remove('is-open');
+    modal.setAttribute('aria-hidden', 'true');
+  }
+  document.body.style.overflow = rescheduleBodyOverflow;
+}
+
+function isBookingDateDisabled(date) {
+  const day = date.toLocaleString('en-US', { weekday: 'long' });
+  const enabledDays = availabilityManager.getEnabledDays();
+  if (!enabledDays.includes(day)) return true;
+
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const selectedDateStart = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  if (selectedDateStart <= today) return true;
+
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const dayOfMonth = String(date.getDate()).padStart(2, '0');
+  return availabilityManager.isDateBlocked(`${year}-${month}-${dayOfMonth}`);
+}
+
+function renderRescheduleTimeSlots(selectedDate, dateStr) {
+  const container = document.getElementById('rescheduleTimeSlots');
+  const confirmButton = document.getElementById('confirmRescheduleBtn');
+  if (!container) return;
+
+  rescheduleSelectedTimeSlot = '';
+  if (confirmButton) confirmButton.disabled = true;
+  container.innerHTML = '';
+
+  if (!selectedDate) {
+    container.innerHTML = '<p class="reschedule-time-slots__hint">Choose a date to see available times.</p>';
+    return;
+  }
+
+  const weekday = selectedDate.toLocaleString('en-US', { weekday: 'long' });
+  const times = timeSlotsMap[weekday] || [];
+  if (!times.length) {
+    container.innerHTML = '<p class="reschedule-time-slots__hint">No appointment times are available on this date.</p>';
+    return;
+  }
+
+  times.forEach(time => {
+    const fullSlot = `${dateStr} ${time}`;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'reschedule-time-slot';
+    button.textContent = time;
+
+    const unavailable = bookedSlots.includes(fullSlot) || availabilityManager.isSlotBlocked(dateStr, time);
+    if (unavailable) {
+      button.disabled = true;
+      button.textContent = `${time} unavailable`;
+    } else {
+      button.addEventListener('click', () => {
+        container.querySelectorAll('.reschedule-time-slot').forEach(slot => slot.classList.remove('is-selected'));
+        button.classList.add('is-selected');
+        rescheduleSelectedTimeSlot = fullSlot;
+        if (confirmButton) confirmButton.disabled = false;
+      });
+    }
+    container.appendChild(button);
+  });
+}
+
+function initializeReschedulePicker() {
+  if (reschedulePicker || typeof flatpickr !== 'function' || !availabilityManager) return;
+  const input = document.getElementById('rescheduleDate');
+  if (!input) return;
+
+  reschedulePicker = flatpickr(input, {
+    dateFormat: 'Y-m-d',
+    minDate: 'today',
+    inline: true,
+    disableMobile: true,
+    allowInput: false,
+    disable: [isBookingDateDisabled],
+    onChange: (selectedDates, dateStr) => renderRescheduleTimeSlots(selectedDates[0], dateStr)
+  });
+}
+
+async function confirmRescheduleFromModal() {
+  const button = document.getElementById('confirmRescheduleBtn');
+  const error = document.getElementById('rescheduleModalError');
+  if (!rescheduleState || !rescheduleSelectedTimeSlot || !button) return;
+
+  button.disabled = true;
+  button.textContent = 'Rescheduling...';
+  if (error) error.hidden = true;
+
+  try {
+    const result = await submitBookingReschedule(rescheduleSelectedTimeSlot);
+    const smsNote = result.smsSent ? ' A confirmation SMS has been sent.' : '';
+    cancelBookingReschedule();
+    showPopup(`Appointment rescheduled.${smsNote}`);
+    if (window.refreshUserBookings) setTimeout(() => window.refreshUserBookings(), 500);
+    const lookupButton = document.getElementById('lookupBookingBtn');
+    const lookupPhone = document.getElementById('lookupPhone');
+    if (lookupButton && lookupPhone && lookupPhone.value.trim()) {
+      setTimeout(() => lookupButton.click(), 500);
+    }
+  } catch (err) {
+    if (error) {
+      error.textContent = err.message || 'Unable to reschedule. Please try another time.';
+      error.hidden = false;
+    }
+    button.disabled = false;
+    button.textContent = 'Confirm new time';
+  }
+}
+
+function startGuestBookingReschedule(bookingId) {
+  const booking = window.guestLookupBookingCache && window.guestLookupBookingCache.get(bookingId);
+  const phoneInput = document.getElementById('lookupPhone');
+  if (!booking || !phoneInput) return;
+  startBookingReschedule(booking, phoneInput.value.trim());
 }
 
 // Initialize Firebase with secure configuration
@@ -275,6 +460,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     ],
     onChange: function(selectedDates, dateStr) {
       const selectedDate = selectedDates[0];
+      if (!selectedDate) {
+        slotContainer.innerHTML = '';
+        slotContainer.classList.remove('active');
+        const hiddenSlot = document.getElementById('timeSlotHidden');
+        if (hiddenSlot) hiddenSlot.value = '';
+        return;
+      }
       const weekday = selectedDate.toLocaleString('en-US', { weekday: 'long' });
       const slots = timeSlotsMap[weekday] || [];
 
@@ -292,6 +484,11 @@ document.addEventListener("DOMContentLoaded", async () => {
           btn.style.backgroundColor = '#a00';
           btn.style.opacity = '0.5';
           btn.title = 'Already booked';
+        } else if (availabilityManager.isSlotBlocked(dateStr, time)) {
+          btn.disabled = true;
+          btn.style.backgroundColor = '#444';
+          btn.style.opacity = '0.5';
+          btn.title = 'Unavailable';
         } else {
           btn.onclick = () => {
             document.querySelectorAll("#timeSlots button").forEach(b => b.classList.remove("time-selected"));
@@ -367,6 +564,8 @@ document.addEventListener("DOMContentLoaded", async () => {
       btn.classList.add('service-selected');
       document.getElementById('selectedServiceHidden').value = btn.dataset.service;
       document.getElementById('selectedPriceHidden').value = btn.dataset.price;
+      const errEl = document.getElementById('serviceError');
+      if (errEl) errEl.style.display = 'none';
     });
   });
   // ─────────────────────────────────────────────────────────────────────────
@@ -391,9 +590,12 @@ document.addEventListener("DOMContentLoaded", async () => {
     removeNameError();
 
     // Require a service to be selected
-    if (!service) {
+    const allowedServices = ['Fade', 'Trim', 'Fade + Trim'];
+    if (!service || !allowedServices.includes(service)) {
+      const errEl = document.getElementById('serviceError');
+      if (errEl) errEl.style.display = 'block';
       showPopup("⚠️ Please select a service (Fade, Trim, or Both) before booking.");
-      document.getElementById('serviceSelector').scrollIntoView({ behavior: 'smooth' });
+      document.getElementById('serviceSelector').scrollIntoView({ behavior: 'smooth', block: 'center' });
       return;
     }
 
@@ -421,7 +623,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     // Layer 1: Device fingerprint check — guests only.
     // Logged-in clients are rate-limited separately (server-side, up to 4 bookings per 10 min).
     const isLoggedIn = authManager && authManager.isLoggedIn();
-    if (!isLoggedIn && isRateLimitedLocally()) return;
+    if (!rescheduleState && !isLoggedIn && isRateLimitedLocally()) return;
 
     const data = {
       name,
@@ -444,6 +646,23 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     try {
+      if (rescheduleState) {
+        if (submitBtn) submitBtn.textContent = 'Rescheduling...';
+        const result = await submitBookingReschedule(timeSlot);
+        const smsNote = result.smsSent ? ' A confirmation SMS has been sent.' : '';
+        showPopup(`Appointment rescheduled.${smsNote}`);
+        cancelBookingReschedule();
+        form.reset();
+        slotContainer.innerHTML = '';
+        if (window.refreshUserBookings) setTimeout(() => window.refreshUserBookings(), 500);
+        const lookupButton = document.getElementById('lookupBookingBtn');
+        const lookupPhone = document.getElementById('lookupPhone');
+        if (lookupButton && lookupPhone && lookupPhone.value.trim()) {
+          setTimeout(() => lookupButton.click(), 500);
+        }
+        return;
+      }
+
       // If logged in, create booking directly (rules require userId match).
       // If guest, create booking via Cloud Function (keeps bookings private + prevents public writes).
       if (authManager && authManager.isLoggedIn()) {
@@ -525,13 +744,24 @@ document.addEventListener("DOMContentLoaded", async () => {
       // Always restore the button regardless of success or error
       if (submitBtn) {
         submitBtn.disabled = false;
-        submitBtn.textContent = originalBtnText;
+        submitBtn.textContent = rescheduleState ? 'Confirm Reschedule' : 'Confirm Booking';
         submitBtn.style.opacity = '1';
       }
     }
   });
   
   // Setup booking lookup functionality after everything is initialized
+  document.getElementById('confirmRescheduleBtn')?.addEventListener('click', confirmRescheduleFromModal);
+  document.getElementById('closeRescheduleModalBtn')?.addEventListener('click', cancelBookingReschedule);
+  document.getElementById('keepCurrentBookingBtn')?.addEventListener('click', cancelBookingReschedule);
+  document.getElementById('rescheduleModal')?.addEventListener('click', event => {
+    if (event.target.id === 'rescheduleModal') cancelBookingReschedule();
+  });
+  document.addEventListener('keydown', event => {
+    const modal = document.getElementById('rescheduleModal');
+    if (event.key === 'Escape' && modal?.classList.contains('is-open')) cancelBookingReschedule();
+  });
+
   setupBookingLookup();
 });
 
@@ -777,6 +1007,9 @@ function setupBookingLookup() {
       }
 
       const bookings = payload.bookings || [];
+      window.guestLookupBookingCache = new Map(
+        bookings.map(booking => [booking.bookingId, booking])
+      );
 
       if (bookings.length === 0) {
         lookupResults.innerHTML = `
@@ -813,10 +1046,16 @@ function setupBookingLookup() {
               <p style="color: #ccc; margin: 5px 0;"><strong>Phone:</strong> ${booking.phone}</p>
               ${booking.notes ? `<p style="color: #ccc; margin: 5px 0;"><strong>Notes:</strong> ${booking.notes}</p>` : ''}
             </div>
-            <button onclick="cancelBooking('${booking.bookingId}', '${booking.name}')" 
-                    style="background: #f44336; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: bold;">
-              🗑️ Cancel Booking
-            </button>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+              <button onclick="startGuestBookingReschedule('${booking.bookingId}')"
+                      style="flex: 1; min-width: 120px; background: #CE1126; color: white; border: 2px solid #CE1126; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: bold;">
+                Reschedule
+              </button>
+              <button onclick="cancelBooking('${booking.bookingId}', '${booking.name}')"
+                      style="flex: 1; min-width: 120px; background: transparent; color: #ff8a80; border: 1px solid #f44336; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: bold;">
+                Cancel Booking
+              </button>
+            </div>
           </div>
         `;
       });
@@ -887,7 +1126,9 @@ function showCancellationModal(bookingId, customerName) {
 // without needing Firestore write access. Phone number is verified server-side.
 async function performCancellation(bookingId, customerName) {
   try {
-    const phone = document.getElementById('lookupPhone') ? document.getElementById('lookupPhone').value.trim() : '';
+    const lookupPhoneInput = document.getElementById('lookupPhone');
+    const accountUser = authManager && authManager.isLoggedIn() ? authManager.getCurrentUser() : null;
+    const phone = (lookupPhoneInput && lookupPhoneInput.value.trim()) || (accountUser && accountUser.phone) || '';
     const baseUrl = getFunctionsBaseUrl();
 
     if (baseUrl && phone) {
@@ -901,9 +1142,6 @@ async function performCancellation(bookingId, customerName) {
       if (!res.ok || !payload.success) {
         throw new Error(payload.message || 'Cancellation failed');
       }
-    } else if (authManager && authManager.isLoggedIn()) {
-      // Fallback: logged-in user cancelling from their bookings panel (not lookup section)
-      await db.collection("bookings").doc(bookingId).delete();
     } else {
       throw new Error('Unable to cancel — please enter your phone number in the lookup field first.');
     }
@@ -1063,3 +1301,7 @@ function removePhoneError() {
     existingError.remove();
   }
 }
+
+window.startBookingReschedule = startBookingReschedule;
+window.startGuestBookingReschedule = startGuestBookingReschedule;
+window.cancelBookingReschedule = cancelBookingReschedule;

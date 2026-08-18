@@ -41,6 +41,12 @@ async function loadUserBookings(user) {
       }
     });
 
+    // Keep booking details out of inline handlers while still allowing a card
+    // action to start the shared reschedule flow.
+    window.userBookingCache = new Map(
+      [...upcomingBookings, ...pastBookings].map(booking => [booking.id, booking])
+    );
+
     // Display bookings
     displayUserBookings(upcomingBookings, pastBookings);
 
@@ -232,6 +238,10 @@ function createBookingCard(booking, isUpcoming) {
   if (isUpcoming) {
     // Upcoming booking actions
     card += `
+        <button onclick="startUserBookingReschedule('${booking.id}')"
+                style="flex: 1; min-width: 120px; background: #CE1126; color: white; border: 2px solid #CE1126; padding: 12px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: bold; transition: background 0.2s;">
+          Reschedule
+        </button>
         <button onclick="addBookingToCalendar('${booking.timeSlot}', '${booking.name}')" 
                 style="flex: 1; min-width: 120px; background: #006847; color: white; border: none; padding: 12px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: bold; transition: background 0.2s;"
                 onmouseover="this.style.background='#004f35'" onmouseout="this.style.background='#006847'">
@@ -266,6 +276,16 @@ async function cancelUserBooking(bookingId, customerName) {
   showCancellationModal(bookingId, customerName);
 }
 
+function startUserBookingReschedule(bookingId) {
+  const booking = window.userBookingCache && window.userBookingCache.get(bookingId);
+  const user = window.authManager && window.authManager.getCurrentUser();
+  if (!booking || !user || !window.startBookingReschedule) {
+    console.error('Unable to start reschedule flow');
+    return;
+  }
+  window.startBookingReschedule(booking, user.phone);
+}
+
 // Add booking to calendar (reuse from booking.js)
 function addBookingToCalendar(timeSlot, customerName) {
   // This function should already exist in booking.js
@@ -289,6 +309,6 @@ async function refreshUserBookings() {
 // Export functions
 window.loadUserBookings = loadUserBookings;
 window.cancelUserBooking = cancelUserBooking;
+window.startUserBookingReschedule = startUserBookingReschedule;
 window.addBookingToCalendar = addBookingToCalendar;
 window.refreshUserBookings = refreshUserBookings;
-

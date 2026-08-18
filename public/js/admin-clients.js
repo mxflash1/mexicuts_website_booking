@@ -13,9 +13,7 @@ async function loadClients() {
   if (!window.db) {
     console.error('Database not initialized yet');
     clientsList.innerHTML = `
-      <p style="text-align: center; color: #f44336;">
-        ⚠️ Database not ready. Retrying...
-      </p>
+      <div class="loading-state"><span class="loading-state__spinner" aria-hidden="true"></span> Connecting…</div>
     `;
     // Retry after 1 second
     setTimeout(loadClients, 1000);
@@ -59,11 +57,17 @@ async function loadClients() {
   } catch (error) {
     console.error('Error loading clients:', error);
     clientsList.innerHTML = `
-      <p style="text-align: center; color: #f44336;">
-        ❌ Error loading clients. Please refresh.
-      </p>
+      <div class="empty-state">
+        <svg class="empty-state__icon"><use href="#i-info"/></svg>
+        <div class="empty-state__title">Couldn't load clients</div>
+        <div class="empty-state__hint">Please refresh and try again.</div>
+      </div>
     `;
   }
+}
+
+function escapeAttr(s) {
+  return String(s == null ? '' : s).replace(/'/g, "\\'").replace(/"/g, '&quot;');
 }
 
 // Display clients in the list
@@ -72,63 +76,59 @@ function displayClients(clients) {
 
   if (clients.length === 0) {
     clientsList.innerHTML = `
-      <p style="text-align: center; color: #999; padding: 40px;">
-        No registered clients yet
-      </p>
+      <div class="empty-state">
+        <svg class="empty-state__icon"><use href="#i-users"/></svg>
+        <div class="empty-state__title">No registered clients yet</div>
+        <div class="empty-state__hint">Bookings will appear here once customers create accounts.</div>
+      </div>
     `;
     return;
   }
 
   let html = '';
   clients.forEach(client => {
-    const joinDate = client.createdAt ? 
-      client.createdAt.toDate().toLocaleDateString('en-AU', { 
-        year: 'numeric', 
-        month: 'short', 
-        day: 'numeric' 
-      }) : 
-      'Unknown';
+    const joinDate = client.createdAt
+      ? client.createdAt.toDate().toLocaleDateString('en-AU', { year:'numeric', month:'short', day:'numeric' })
+      : 'Unknown';
 
-    const isNew = client.createdAt && 
-      (new Date() - client.createdAt.toDate()) < (7 * 24 * 60 * 60 * 1000);
-
+    const isNew = client.createdAt && (new Date() - client.createdAt.toDate()) < (7 * 24 * 60 * 60 * 1000);
     const status = client.accountStatus || 'approved';
-    const statusColor = status === 'approved' ? '#4CAF50' :
-                        status === 'rejected' ? '#f44336' : '#FFC107';
+    const badgeClass = status === 'approved' ? 'badge--success'
+                     : status === 'rejected' ? 'badge--danger'
+                     : 'badge--warning';
+
+    const safeId = escapeAttr(client.id);
+    const safeName = escapeAttr(client.name || 'Unknown');
 
     html += `
-      <div class="client-card">
-        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 10px;">
-          <h4>${client.name || 'Unknown'} ${isNew ? '<span style="background: #006847; color: white; font-size: 10px; padding: 2px 8px; border-radius: 12px; margin-left: 8px;">NEW</span>' : ''}</h4>
-          <div style="display: flex; gap: 8px;">
-            <span style="align-self:center; padding:3px 8px; border-radius:999px; border:1px solid ${statusColor}; color:${statusColor}; font-size:11px; font-weight:bold;">
-              ${status.toUpperCase()}
-            </span>
-            <button onclick="editClient('${client.id}')" 
-                    style="background: #006847; color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px;">
-              ✏️ Edit
-            </button>
-          <button onclick="viewClientDetails('${client.id}')" 
-                  style="background: #555; color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px;">
-              👁️ View
-            </button>
-            <button onclick="approveClient('${client.id}')" 
-                    style="background: #4CAF50; color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px;">
-              ✅ Approve
-            </button>
-            <button onclick="rejectClient('${client.id}')" 
-                    style="background: #f44336; color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px;">
-              ❌ Reject
-            </button>
-            <button onclick="deleteClient('${client.id}', '${client.name || 'Unknown'}')" 
-                    style="background: #CE1126; color: white; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px;">
-              🗑️ Delete
-            </button>
+      <div class="list-card">
+        <div class="list-card__row">
+          <div style="flex:1; min-width:0;">
+            <div class="list-card__title">
+              ${(client.name || 'Unknown').replace(/</g,'&lt;')}
+              ${isNew ? '<span class="badge badge--brand">New</span>' : ''}
+              <span class="badge ${badgeClass}">${status}</span>
+            </div>
+            <div class="list-card__meta">
+              <div class="list-card__meta-row">
+                <svg><use href="#i-phone"/></svg>${client.phone || 'No phone'}
+              </div>
+              <div class="list-card__meta-row">
+                <svg><use href="#i-calendar"/></svg>Joined ${joinDate}
+              </div>
+              <div class="list-card__meta-row">
+                <svg><use href="#i-list"/></svg>${client.bookingCount || 0} booking${(client.bookingCount || 0) === 1 ? '' : 's'}
+              </div>
+            </div>
           </div>
         </div>
-        <div class="client-info">📱 ${client.phone || 'No phone'}</div>
-        <div class="client-info">📅 Joined: ${joinDate}</div>
-        <div class="client-info">📋 Bookings: ${client.bookingCount || 0}</div>
+        <div class="list-card__actions">
+          <button class="btn btn-quiet btn-sm" type="button" onclick="viewClientDetails('${safeId}')">View</button>
+          <button class="btn btn-ghost btn-sm" type="button" onclick="editClient('${safeId}')">Edit</button>
+          ${status !== 'approved' ? `<button class="btn btn-success btn-sm" type="button" onclick="approveClient('${safeId}')">Approve</button>` : ''}
+          ${status !== 'rejected' ? `<button class="btn btn-quiet btn-sm" type="button" onclick="rejectClient('${safeId}')">Reject</button>` : ''}
+          <button class="btn btn-danger btn-sm" type="button" onclick="deleteClient('${safeId}', '${safeName}')">Delete</button>
+        </div>
       </div>
     `;
   });
@@ -237,103 +237,79 @@ function showClientModal(client, bookings) {
   // Sort past bookings (most recent first)
   pastBookings.sort((a, b) => new Date(b.timeSlot) - new Date(a.timeSlot));
 
-  // Format booking display (matching main website style)
+  // Format a single booking row
   function formatBooking(booking) {
     const [datePart, timePart, ampm] = booking.timeSlot.split(' ');
     const [year, month, day] = datePart.split('-');
     const bookingDate = new Date(year, month - 1, day);
-    
-    const dateStr = bookingDate.toLocaleDateString('en-AU', { 
-      weekday: 'long', 
-      year: 'numeric', 
-      month: 'long', 
-      day: 'numeric' 
+
+    const dateStr = bookingDate.toLocaleDateString('en-AU', {
+      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
     });
 
+    const service = booking.service
+      ? `${booking.service}${booking.price ? ` · $${booking.price}` : ''}`
+      : 'Haircut · $20';
+
     return `
-      <div style="background: #1a3a1a; border: 2px solid #006847; border-radius: 12px; padding: 20px; margin-bottom: 15px;">
-        <div style="color: #CE1126; font-weight: bold; font-size: 16px; margin-bottom: 10px;">
-          📅 ${dateStr}
+      <div class="list-card">
+        <div class="list-card__title">${dateStr}</div>
+        <div class="list-card__meta">
+          <div class="list-card__meta-row"><svg><use href="#i-clock"/></svg>${timePart} ${ampm}</div>
+          <div class="list-card__meta-row"><svg><use href="#i-scissors"/></svg>${service}</div>
+          <div class="list-card__meta-row text-tertiary">Peregian Springs, Sunshine Coast</div>
+          ${booking.notes ? `<div class="list-card__meta-row text-tertiary">"${(booking.notes || '').replace(/</g,'&lt;')}"</div>` : ''}
         </div>
-        <div style="color: white; font-size: 18px; font-weight: bold; margin-bottom: 12px;">
-          🕐 ${timePart} ${ampm}
-        </div>
-        <div style="background: #0a0a0a; padding: 12px; border-radius: 8px; margin-bottom: 10px;">
-          <div style="color: #ccc; font-size: 14px; margin-bottom: 5px;">
-            <strong style="color: #006847;">Service:</strong> ${booking.service ? `${booking.service}${booking.price ? ` ($${booking.price})` : ''}` : 'Haircut ($20)'}
-          </div>
-          <div style="color: #ccc; font-size: 14px;">
-            <strong style="color: #006847;">Location:</strong> Peregian Springs, Sunshine Coast
-          </div>
-        </div>
-        ${booking.notes ? `
-          <div style="background: #2a2a2a; padding: 10px; border-radius: 6px; border-left: 3px solid #006847;">
-            <div style="color: #999; font-size: 12px; margin-bottom: 3px;">Notes:</div>
-            <div style="color: #ccc; font-size: 13px;">${booking.notes}</div>
-          </div>
-        ` : ''}
       </div>
     `;
   }
 
+  const joined = client.createdAt
+    ? client.createdAt.toDate().toLocaleDateString('en-AU', { year:'numeric', month:'short', day:'numeric' })
+    : 'Unknown';
+
   const modalHTML = `
-    <div id="clientDetailsModal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 2000; overflow-y: auto; padding: 20px;">
-      <div style="background: #1a1a1a; border: 3px solid #CE1126; border-radius: 12px; padding: 30px; max-width: 800px; margin: 0 auto;">
-        
-        <!-- Header -->
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px;">
-          <h2 style="color: #CE1126; margin: 0; font-size: 28px;">👤 ${client.name || 'Client'}</h2>
-          <button onclick="closeClientModal()" style="background: #CE1126; border: none; color: white; font-size: 24px; width: 40px; height: 40px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center;">&times;</button>
-        </div>
-
-        <!-- Client Info Summary -->
-        <div style="background: #2a2a2a; padding: 20px; border-radius: 12px; margin-bottom: 30px; border-left: 4px solid #006847;">
-          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
-            <div>
-              <div style="color: #999; font-size: 13px; margin-bottom: 5px;">📱 Phone</div>
-              <div style="color: white; font-size: 16px; font-weight: bold;">${client.phone || 'N/A'}</div>
-          </div>
-            <div>
-              <div style="color: #999; font-size: 13px; margin-bottom: 5px;">📅 Joined</div>
-              <div style="color: white; font-size: 16px; font-weight: bold;">${client.createdAt ? client.createdAt.toDate().toLocaleDateString('en-AU', { year: 'numeric', month: 'short', day: 'numeric' }) : 'Unknown'}</div>
-          </div>
-          <div>
-              <div style="color: #999; font-size: 13px; margin-bottom: 5px;">📋 Total Bookings</div>
-              <div style="color: #4CAF50; font-size: 20px; font-weight: bold;">${bookings.length}</div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Upcoming Appointments Section -->
-        ${upcomingBookings.length > 0 ? `
-          <div style="margin-bottom: 30px;">
-            <h3 style="color: #006847; margin-bottom: 20px; font-size: 22px; display: flex; align-items: center; gap: 10px;">
-              📅 Upcoming Appointments
-              <span style="background: #006847; color: white; font-size: 14px; padding: 2px 10px; border-radius: 12px;">${upcomingBookings.length}</span>
-            </h3>
-            ${upcomingBookings.map(booking => formatBooking(booking)).join('')}
-              </div>
-        ` : ''}
-
-        <!-- Past Appointments Section -->
-        <div>
-          <h3 style="color: #CE1126; margin-bottom: 20px; font-size: 22px; display: flex; align-items: center; gap: 10px;">
-            📜 Past Appointments
-            <span style="background: #CE1126; color: white; font-size: 14px; padding: 2px 10px; border-radius: 12px;">${pastBookings.length}</span>
+    <div id="clientDetailsModal" class="modal" style="display:block;" role="dialog" aria-modal="true">
+      <div class="modal-content" style="max-width: 720px;">
+        <div class="modal__head">
+          <h3 class="modal__title">
+            <svg><use href="#i-users"/></svg>
+            ${(client.name || 'Client').replace(/</g,'&lt;')}
           </h3>
-          ${pastBookings.length === 0 ? 
-            '<p style="text-align: center; color: #999; padding: 40px; background: #2a2a2a; border-radius: 8px;">No past appointments yet</p>' :
-            pastBookings.map(booking => formatBooking(booking)).join('')
-          }
-        </div>
-
-        <!-- Close Button -->
-        <div style="margin-top: 30px; text-align: center;">
-          <button onclick="closeClientModal()" style="background: #CE1126; color: white; border: none; padding: 14px 32px; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 16px;">
-            ✖️ Close
+          <button type="button" class="modal__close" aria-label="Close" onclick="closeClientModal()">
+            <svg><use href="#i-x"/></svg>
           </button>
         </div>
 
+        <div class="stats-grid" style="margin-bottom: var(--space-5);">
+          <div class="stat-card">
+            <svg class="stat-card__icon"><use href="#i-phone"/></svg>
+            <div class="stat-number" style="font-size: var(--text-md);">${client.phone || 'N/A'}</div>
+            <div class="stat-label">Phone</div>
+          </div>
+          <div class="stat-card">
+            <svg class="stat-card__icon"><use href="#i-calendar"/></svg>
+            <div class="stat-number" style="font-size: var(--text-md);">${joined}</div>
+            <div class="stat-label">Joined</div>
+          </div>
+          <div class="stat-card">
+            <svg class="stat-card__icon"><use href="#i-list"/></svg>
+            <div class="stat-number">${bookings.length}</div>
+            <div class="stat-label">Total bookings</div>
+          </div>
+        </div>
+
+        ${upcomingBookings.length > 0 ? `
+          <div class="section-heading"><svg class="icon-leading"><use href="#i-calendar"/></svg> Upcoming · ${upcomingBookings.length}</div>
+          ${upcomingBookings.map(formatBooking).join('')}
+        ` : ''}
+
+        <div class="section-heading" style="margin-top: var(--space-5);"><svg class="icon-leading"><use href="#i-clock"/></svg> Past · ${pastBookings.length}</div>
+        ${pastBookings.length === 0
+          ? `<div class="empty-state"><div class="empty-state__hint">No past appointments yet.</div></div>`
+          : pastBookings.map(formatBooking).join('')}
+
+        <button type="button" class="btn btn-block" style="margin-top: var(--space-5);" onclick="closeClientModal()">Close</button>
       </div>
     </div>
   `;
@@ -408,9 +384,11 @@ async function loadPendingClients() {
 
     if (snapshot.empty) {
       container.innerHTML = `
-        <p style="text-align:center; color:#999; padding:10px;">
-          No pending clients right now.
-        </p>
+        <div class="empty-state">
+          <svg class="empty-state__icon"><use href="#i-check"/></svg>
+          <div class="empty-state__title">All caught up</div>
+          <div class="empty-state__hint">No pending clients right now.</div>
+        </div>
       `;
       return;
     }
@@ -418,35 +396,31 @@ async function loadPendingClients() {
     let html = '';
     snapshot.forEach(doc => {
       const client = { id: doc.id, ...doc.data() };
-      const joinDate = client.createdAt ?
-        client.createdAt.toDate().toLocaleDateString('en-AU', {
-          year: 'numeric',
-          month: 'short',
-          day: 'numeric'
-        }) :
-        'Unknown';
+      const joinDate = client.createdAt
+        ? client.createdAt.toDate().toLocaleDateString('en-AU', { year:'numeric', month:'short', day:'numeric' })
+        : 'Unknown';
+      const safeId = escapeAttr(client.id);
+      const safeName = escapeAttr(client.name || 'Unknown');
 
       html += `
-        <div class="client-card">
-          <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:10px;">
-            <h4>${client.name || 'Unknown'}</h4>
-            <div style="display:flex; gap:6px;">
-              <button onclick="approveClient('${client.id}')" 
-                      style="background:#4CAF50; color:white; border:none; padding:4px 8px; border-radius:6px; font-size:11px; cursor:pointer;">
-                ✅ Approve
-              </button>
-              <button onclick="rejectClient('${client.id}')" 
-                      style="background:#f0ad4e; color:white; border:none; padding:4px 8px; border-radius:6px; font-size:11px; cursor:pointer;">
-                ❌ Reject
-              </button>
-              <button onclick="deleteClient('${client.id}', '${client.name || 'Unknown'}')" 
-                      style="background:#CE1126; color:white; border:none; padding:4px 8px; border-radius:6px; font-size:11px; cursor:pointer;">
-                🗑️ Delete
-              </button>
+        <div class="list-card list-card--warning">
+          <div class="list-card__row">
+            <div style="flex:1; min-width:0;">
+              <div class="list-card__title">
+                ${(client.name || 'Unknown').replace(/</g,'&lt;')}
+                <span class="badge badge--warning">Pending</span>
+              </div>
+              <div class="list-card__meta">
+                <div class="list-card__meta-row"><svg><use href="#i-phone"/></svg>${client.phone || 'No phone'}</div>
+                <div class="list-card__meta-row"><svg><use href="#i-calendar"/></svg>Joined ${joinDate}</div>
+              </div>
             </div>
           </div>
-          <div class="client-info">📱 ${client.phone || 'No phone'}</div>
-          <div class="client-info">📅 Joined: ${joinDate}</div>
+          <div class="list-card__actions">
+            <button class="btn btn-success btn-sm" type="button" onclick="approveClient('${safeId}')">Approve</button>
+            <button class="btn btn-quiet btn-sm" type="button" onclick="rejectClient('${safeId}')">Reject</button>
+            <button class="btn btn-danger btn-sm" type="button" onclick="deleteClient('${safeId}', '${safeName}')">Delete</button>
+          </div>
         </div>
       `;
     });
@@ -455,9 +429,10 @@ async function loadPendingClients() {
   } catch (error) {
     console.error('Error loading pending clients:', error);
     container.innerHTML = `
-      <p style="text-align:center; color:#f44336; padding:10px;">
-        Error loading pending clients.
-      </p>
+      <div class="empty-state">
+        <svg class="empty-state__icon"><use href="#i-info"/></svg>
+        <div class="empty-state__title">Couldn't load pending clients</div>
+      </div>
     `;
   }
 }
@@ -475,51 +450,41 @@ async function editClient(clientId) {
     const client = clientDoc.data();
 
     // Show edit modal
+    const safeName = (client.name || '').replace(/"/g, '&quot;');
+    const safePhone = (client.phone || '').replace(/"/g, '&quot;');
     const modalHTML = `
-      <div id="editClientModal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 2000; display: flex; justify-content: center; align-items: center; padding: 20px;">
-        <div style="background: #2a2a2a; border: 2px solid #006847; border-radius: 12px; padding: 30px; max-width: 500px; width: 100%;">
-          
-          <!-- Header -->
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-            <h3 style="color: #006847; margin: 0;">✏️ Edit Client</h3>
-            <button onclick="closeEditClientModal()" style="background: none; border: none; color: #ccc; font-size: 28px; cursor: pointer;">&times;</button>
+      <div id="editClientModal" class="modal" style="display:block;" role="dialog" aria-modal="true">
+        <div class="modal-content">
+          <div class="modal__head">
+            <h3 class="modal__title">
+              <svg><use href="#i-edit"/></svg>
+              Edit client
+            </h3>
+            <button type="button" class="modal__close" aria-label="Close" onclick="closeEditClientModal()">
+              <svg><use href="#i-x"/></svg>
+            </button>
           </div>
 
-          <!-- Edit Form -->
-          <form id="editClientForm" style="display: flex; flex-direction: column; gap: 15px;">
-            <div>
-              <label style="display: block; color: #ccc; margin-bottom: 5px; font-size: 14px;">Name:</label>
-              <input type="text" id="editClientName" value="${client.name || ''}" required
-                     style="width: 100%; padding: 12px; border: 1px solid #555; border-radius: 6px; background: #1a1a1a; color: white; font-size: 16px; box-sizing: border-box;">
-            </div>
-            
-            <div>
-              <label style="display: block; color: #ccc; margin-bottom: 5px; font-size: 14px;">Phone:</label>
-              <input type="tel" id="editClientPhone" value="${client.phone || ''}" required
-                     style="width: 100%; padding: 12px; border: 1px solid #555; border-radius: 6px; background: #1a1a1a; color: white; font-size: 16px; box-sizing: border-box;">
+          <form id="editClientForm" class="modal__form">
+            <div class="field">
+              <label for="editClientName" class="field__label">Name</label>
+              <input type="text" id="editClientName" class="input" value="${safeName}" required>
             </div>
 
-            <div style="background: #1a1a1a; padding: 15px; border-radius: 8px; margin-top: 10px;">
-              <div style="color: #999; font-size: 13px; margin-bottom: 8px;">
-                <strong style="color: #CE1126;">⚠️ Note:</strong>
-              </div>
-              <div style="color: #ccc; font-size: 13px;">
-                • Changing the phone number won't update their login credentials<br>
-                • User will still log in with their original phone number<br>
-                • This only updates the display information
-              </div>
+            <div class="field">
+              <label for="editClientPhone" class="field__label">Phone</label>
+              <input type="tel" id="editClientPhone" class="input" inputmode="tel" autocomplete="tel" value="${safePhone}" required>
+              <span class="field__hint">Note: changing this number won't update their login credentials. They'll still sign in with their original phone.</span>
             </div>
 
-            <div style="display: flex; gap: 10px; margin-top: 10px;">
-              <button type="submit" style="flex: 1; background: #006847; color: white; border: none; padding: 14px; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 16px;">
-                💾 Save Changes
+            <div class="btn-row">
+              <button type="submit" class="btn btn-secondary">
+                <svg class="btn-icon"><use href="#i-save"/></svg>
+                Save changes
               </button>
-              <button type="button" onclick="closeEditClientModal()" style="flex: 1; background: #666; color: white; border: none; padding: 14px; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 16px;">
-                ❌ Cancel
-              </button>
+              <button type="button" class="btn btn-ghost" onclick="closeEditClientModal()">Cancel</button>
             </div>
           </form>
-
         </div>
       </div>
     `;
