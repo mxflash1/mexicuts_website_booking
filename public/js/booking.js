@@ -96,6 +96,39 @@ function getFunctionsBaseUrl() {
   return null;
 }
 
+function routeManageBookingDeepLink() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('manage') !== 'booking') return;
+
+  const startedAt = Date.now();
+  const routeWhenReady = () => {
+    const authReady = Boolean(window.authManager);
+    const signedIn = Boolean(authReady && window.authManager.isLoggedIn());
+    const timedOut = Date.now() - startedAt >= 2000;
+
+    if (!authReady && !timedOut) {
+      setTimeout(routeWhenReady, 100);
+      return;
+    }
+
+    const accountBookings = document.getElementById('userBookingsSection');
+    const guestManager = document.getElementById('manage-booking');
+    const target = signedIn && accountBookings && accountBookings.style.display !== 'none'
+      ? accountBookings
+      : guestManager;
+
+    if (!target) return;
+    target.scrollIntoView({ behavior: 'auto', block: 'start' });
+
+    if (!signedIn) {
+      const phoneInput = document.getElementById('lookupPhone');
+      setTimeout(() => phoneInput?.focus({ preventScroll: true }), 100);
+    }
+  };
+
+  routeWhenReady();
+}
+
 async function createGuestBooking(data) {
   const baseUrl = getFunctionsBaseUrl();
   if (!baseUrl) throw new Error('Missing projectId for functions URL');
@@ -763,6 +796,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 
   setupBookingLookup();
+  routeManageBookingDeepLink();
 });
 
 // Initialize availability configuration

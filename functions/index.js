@@ -22,7 +22,7 @@ const TWILIO_PHONE_NUMBER = defineSecret('TWILIO_PHONE_NUMBER');
 const GOOGLE_SHEETS_CREDENTIALS = defineSecret('GOOGLE_SHEETS_CREDENTIALS');
 const GOOGLE_SHEET_ID = defineSecret('GOOGLE_SHEET_ID');
 const PAYMENT_SHEET_ID = defineSecret('PAYMENT_SHEET_ID');
-const MANAGE_BOOKING_URL = 'https://mexicuts.au/#manage-booking';
+const MANAGE_BOOKING_URL = 'https://mexicuts.au/?manage=booking#manage-booking';
 
 function createTransporter() {
   const user = process.env.GMAIL_USER;
