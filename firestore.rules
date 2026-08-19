@@ -19,20 +19,22 @@ service cloud.firestore {
     }
     
     // Public-safe booked slots for availability UI (no names/phones).
-    // Written by Cloud Functions; readable by everyone.
+    // Written by Cloud Functions (admin SDK) or directly by admin users.
     match /bookedSlots/{bookingId} {
       allow read: if true;
-      allow write: if false;
+      allow write: if isAdmin();
     }
     
     // Bookings collection (private)
     match /bookings/{bookingId} {
-      // Only signed-in users can create bookings (prevents public spam/writes).
-      allow create: if isSignedIn()
-        && request.resource.data.timeSlot is string
-        && request.resource.data.name is string
-        && request.resource.data.phone is string
-        && request.resource.data.userId == request.auth.uid;
+      // Admins can create any booking. Regular signed-in users can only create
+      // their own (userId must match their auth uid).
+      allow create: if isAdmin()
+        || (isSignedIn()
+          && request.resource.data.timeSlot is string
+          && request.resource.data.name is string
+          && request.resource.data.phone is string
+          && request.resource.data.userId == request.auth.uid);
       
       // Users can read their own bookings; admins can read all.
       allow read: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
@@ -40,6 +42,7 @@ service cloud.firestore {
       // Only admins can edit/delete bookings (keeps integrity simple).
       allow update, delete: if isAdmin();
     }
+
 
     // Public leaderboard data (no phone numbers or raw user docs)
     match /leaderboardPublic/{entryId} {

@@ -42,7 +42,8 @@ class AvailabilityManager {
         Thursday: { enabled: true, startTime: "15:30", endTime: "16:30", slotDuration: 30 }
       },
       settings: { timeFormat: "12hour" },
-      blockedDates: {} // Empty blocked dates for fallback
+      blockedDates: {}, // Empty blocked dates for fallback
+      blockedTimes: {} // Empty blocked time windows for fallback
     };
   }
 
@@ -119,7 +120,10 @@ class AvailabilityManager {
       this.config.displayText.scheduleText[day] || `${day}: Check calendar`
     );
 
-    return `${this.config.displayText.availabilityDescription}<br>${scheduleLines.join('<br>')}`;
+    // Normalise any legacy "$20" description stored in Firestore to the current pricing text.
+    const rawDesc = this.config.displayText.availabilityDescription || '';
+    const description = rawDesc.replace(/Each cut is \$20\.?/, 'Fade or Trim: $20 · Both: $25.');
+    return `${description}<br>${scheduleLines.join('<br>')}`;
   }
 
   // Check if a specific date is blocked
@@ -149,8 +153,46 @@ class AvailabilityManager {
     const date = new Date(dateStr);
     const dayName = date.toLocaleString('en-US', { weekday: 'long' });
     const dayConfig = this.config.businessHours[dayName];
-    
+
     return dayConfig && dayConfig.enabled;
+  }
+
+  // Get blocked time windows for a specific date (array of {startTime, endTime, reason})
+  getBlockedTimesForDate(dateStr) {
+    if (!this.config || !this.config.blockedTimes) return [];
+    const list = this.config.blockedTimes[dateStr];
+    return Array.isArray(list) ? list : [];
+  }
+
+  // Parse a slot label like "09:00 AM", "1:30 PM", or "13:00" to minutes since midnight
+  parseDisplayTime(slotTime) {
+    if (!slotTime || typeof slotTime !== 'string') return null;
+    const trimmed = slotTime.trim().toUpperCase();
+    const match = trimmed.match(/^(\d{1,2}):(\d{2})(?:\s*(AM|PM))?$/);
+    if (!match) return null;
+    let hours = parseInt(match[1], 10);
+    const minutes = parseInt(match[2], 10);
+    const period = match[3];
+    if (period === 'AM') {
+      if (hours === 12) hours = 0;
+    } else if (period === 'PM') {
+      if (hours !== 12) hours += 12;
+    }
+    return hours * 60 + minutes;
+  }
+
+  // Check whether a specific slot time on a given date falls inside a blocked window
+  isSlotBlocked(dateStr, slotTime) {
+    const windows = this.getBlockedTimesForDate(dateStr);
+    if (windows.length === 0) return false;
+    const slotMin = this.parseDisplayTime(slotTime);
+    if (slotMin == null) return false;
+    return windows.some(w => {
+      const start = this.parseTime(w.startTime || '00:00');
+      let end = this.parseTime(w.endTime || '00:00');
+      if (end === 0 && w.endTime === '00:00') end = 1440;
+      return slotMin >= start && slotMin < end;
+    });
   }
 }
 

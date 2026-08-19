@@ -73,91 +73,128 @@ async function loadPendingPayments() {
 
   try {
     console.log('💰 Loading pending payments...');
-    
-    // Get all bookings with pending payment status
-    const bookingsSnapshot = await window.db.collection('bookings')
-      .where('paymentStatus', '==', 'pending')
-      .get();
 
-    if (bookingsSnapshot.empty) {
-      paymentsList.innerHTML = `
-        <p style="text-align: center; color: #999; padding: 40px;">
-          ✅ No pending payments!<br>
-          <span style="font-size: 14px;">All haircuts have been paid for.</span>
-        </p>
-      `;
-      return;
-    }
+    // Show every approved booking from the past ~30 days that hasn't been
+    // fully settled. This catches orphans whose Firestore record never got
+    // `addedToPaymentSheet: true` — e.g. when the cron's sheet write
+    // succeeded but the follow-up Firestore update failed.
+    const bookingsSnapshot = await window.db.collection('bookings').get();
 
     let html = '';
     const pendingPayments = [];
+    const now = new Date();
+    const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+    const thirtyDaysAgo = new Date(now.getTime() - THIRTY_DAYS_MS);
+
+    const parseTimeSlot = (ts) => {
+      if (!ts || typeof ts !== 'string') return null;
+      const m = ts.match(/^(\d{4}-\d{2}-\d{2}) (\d{1,2}):(\d{2}) (AM|PM)$/);
+      if (!m) return null;
+      let hour = parseInt(m[2], 10);
+      const minute = parseInt(m[3], 10);
+      if (m[4] === 'PM' && hour !== 12) hour += 12;
+      if (m[4] === 'AM' && hour === 12) hour = 0;
+      const [y, mo, d] = m[1].split('-').map(Number);
+      return new Date(y, mo - 1, d, hour, minute);
+    };
 
     bookingsSnapshot.forEach(doc => {
-      pendingPayments.push({
-        id: doc.id,
-        ...doc.data()
-      });
+      const data = doc.data();
+      const status = data.status || 'approved';
+      if (status !== 'approved') return;
+      const apptDate = parseTimeSlot(data.timeSlot);
+      if (!apptDate) return;
+      if (apptDate < thirtyDaysAgo || apptDate > now) return; // past 30 days, already-happened only
+
+      const fullySettled =
+        data.paymentStatus === 'paid' &&
+        data.paymentMethod &&
+        data.paymentMethod !== 'pending';
+      if (fullySettled) return;
+      pendingPayments.push({ id: doc.id, ...data });
     });
 
-    // Sort by date (most recent first)
-    pendingPayments.sort((a, b) => {
-      return new Date(b.timeSlot) - new Date(a.timeSlot);
-    });
+    if (pendingPayments.length === 0) {
+      paymentsList.innerHTML = `
+        <div class="empty-state">
+          <svg class="empty-state__icon"><use href="#i-check"/></svg>
+          <div class="empty-state__title">All paid up</div>
+          <div class="empty-state__hint">No pending payments — every booking has been settled.</div>
+        </div>
+      `;
+      const countElement = document.getElementById('pendingPaymentsCount');
+      if (countElement) countElement.textContent = '0';
+      return;
+    }
+
+    pendingPayments.sort((a, b) => new Date(b.timeSlot) - new Date(a.timeSlot));
 
     pendingPayments.forEach(payment => {
       const hasPaymentMethod = payment.paymentMethod && payment.paymentMethod !== 'pending';
-      const methodText = payment.paymentMethod === 'cash' ? '💵 Cash' : payment.paymentMethod === 'card' ? '💳 Card' : '';
-      
+      const displayPrice = payment.price || 20;
+      const service = payment.service || 'Haircut';
+      const methodLabel = payment.paymentMethod === 'cash' ? 'Cash' : payment.paymentMethod === 'card' ? 'Card' : '';
+      const variantClass = hasPaymentMethod ? 'list-card--success' : 'list-card--urgent';
+      const badgeClass = hasPaymentMethod ? 'badge--success' : 'badge--warning';
+      const badgeLabel = hasPaymentMethod ? 'Method set' : 'Pending';
+
       html += `
-        <div class="payment-card" style="
-          background: #1a1a1a;
-          border: 2px solid ${hasPaymentMethod ? '#006847' : '#CE1126'};
-          border-radius: 10px;
-          padding: 20px;
-          margin-bottom: 15px;
-        ">
-          <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 15px;">
-            <div>
-              <h4 style="color: ${hasPaymentMethod ? '#006847' : '#CE1126'}; margin: 0 0 10px 0; font-size: 20px;">${payment.name}</h4>
-              <div style="color: #ccc; font-size: 14px;">
-                <div>📅 ${payment.timeSlot}</div>
-                <div>📱 ${payment.phone}</div>
-                <div>💵 $20</div>
-                ${hasPaymentMethod ? `<div style="margin-top: 8px; color: #4CAF50; font-weight: bold;">✓ Method: ${methodText}</div>` : ''}
+        <div class="list-card ${variantClass}">
+          <div class="list-card__row">
+            <div style="flex:1; min-width:0;">
+              <div class="list-card__title">
+                ${(payment.name || 'Unknown').replace(/</g,'&lt;')}
+                <span class="badge ${badgeClass}">${badgeLabel}</span>
+              </div>
+              <div class="list-card__meta">
+                <div class="list-card__meta-row"><svg><use href="#i-calendar"/></svg>${payment.timeSlot || '—'}</div>
+                <div class="list-card__meta-row"><svg><use href="#i-phone"/></svg>${payment.phone || '—'}</div>
+                <div class="list-card__meta-row"><svg><use href="#i-scissors"/></svg>${service}</div>
+                <div class="list-card__meta-row" style="align-items:center;">
+                  <svg><use href="#i-dollar"/></svg>
+                  <span style="display:inline-flex; align-items:center; gap:6px;">
+                    $
+                    <input type="number"
+                           id="price-${payment.id}"
+                           value="${displayPrice}"
+                           min="1"
+                           style="width:64px; padding:6px 8px; border-radius:6px; border:1px solid var(--border); background: var(--surface-input); color: var(--text); font-size: var(--text-sm);"
+                           onchange="updateBookingPrice('${payment.id}', this.value)"
+                           aria-label="Edit price for ${(payment.name || 'booking').replace(/"/g,'&quot;')}">
+                    <span class="text-tertiary" style="font-size: 11px;">editable</span>
+                  </span>
+                </div>
+                ${hasPaymentMethod ? `<div class="list-card__meta-row text-success" style="font-weight:600;"><svg><use href="#i-check"/></svg>Method: ${methodLabel}</div>` : ''}
               </div>
             </div>
-            <div style="background: rgba(${hasPaymentMethod ? '0, 104, 71' : '206, 17, 38'}, 0.2); padding: 8px 16px; border-radius: 6px;">
-              <span style="color: ${hasPaymentMethod ? '#006847' : '#CE1126'}; font-weight: bold; font-size: 12px;">
-                ${hasPaymentMethod ? 'METHOD SET' : 'PENDING'}
-              </span>
-            </div>
           </div>
-          
+
+          <div style="display:flex; justify-content:flex-end; margin-top: var(--space-2);">
+            <button class="btn btn-ghost btn-sm" type="button" onclick="deleteBookingPayment('${payment.id}', '${(payment.name || '').replace(/'/g,"\\'")}')">
+              <svg class="btn-icon"><use href="#i-trash"/></svg>Delete
+            </button>
+          </div>
+
           ${!hasPaymentMethod ? `
-            <div style="margin-bottom: 10px; color: #999; font-size: 13px; font-style: italic;">
-              Step 1: Select payment method
-            </div>
-            <div style="display: flex; gap: 10px; margin-top: 15px;">
-              <button onclick="setPaymentMethod('${payment.id}', 'cash')" 
-                      style="flex: 1; background: #006847; color: white; border: none; padding: 12px; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 14px;">
-                💵 Cash
+            <div class="text-tertiary" style="font-size: var(--text-sm); margin-top: var(--space-3); margin-bottom: var(--space-2);">Step 1 · Select payment method</div>
+            <div class="btn-row">
+              <button class="btn btn-secondary" type="button" onclick="setPaymentMethod('${payment.id}', 'cash')">
+                <svg class="btn-icon"><use href="#i-cash"/></svg>
+                Cash
               </button>
-              <button onclick="setPaymentMethod('${payment.id}', 'card')" 
-                      style="flex: 1; background: #4CAF50; color: white; border: none; padding: 12px; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 14px;">
-                💳 Card
+              <button class="btn btn-success" type="button" onclick="setPaymentMethod('${payment.id}', 'card')">
+                <svg class="btn-icon"><use href="#i-credit-card"/></svg>
+                Card
               </button>
             </div>
           ` : `
-            <div style="margin-bottom: 10px; color: #999; font-size: 13px; font-style: italic;">
-              Step 2: Confirm when payment is received
-            </div>
-            <button onclick="confirmPaymentReceived('${payment.id}')" 
-                    style="width: 100%; background: #4CAF50; color: white; border: none; padding: 15px; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 16px;">
-              ✅ Mark as Paid
+            <div class="text-tertiary" style="font-size: var(--text-sm); margin-top: var(--space-3); margin-bottom: var(--space-2);">Step 2 · Mark paid when received</div>
+            <button class="btn btn-success btn-block" type="button" onclick="confirmPaymentReceived('${payment.id}')">
+              <svg class="btn-icon"><use href="#i-check"/></svg>
+              Mark as paid
             </button>
-            <button onclick="changePaymentMethod('${payment.id}')" 
-                    style="width: 100%; background: transparent; color: #999; border: 1px solid #555; padding: 8px; border-radius: 6px; cursor: pointer; font-size: 12px; margin-top: 8px;">
-              Change Method
+            <button class="btn btn-ghost btn-block btn-sm" type="button" style="margin-top: var(--space-2);" onclick="changePaymentMethod('${payment.id}')">
+              Change method
             </button>
           `}
         </div>
@@ -165,19 +202,18 @@ async function loadPendingPayments() {
     });
 
     paymentsList.innerHTML = html;
-    
-    // Update count
+
     const countElement = document.getElementById('pendingPaymentsCount');
-    if (countElement) {
-      countElement.textContent = pendingPayments.length;
-    }
+    if (countElement) countElement.textContent = pendingPayments.length;
 
   } catch (error) {
     console.error('Error loading pending payments:', error);
     paymentsList.innerHTML = `
-      <p style="text-align: center; color: #f44336;">
-        ❌ Error loading payments. Please refresh.
-      </p>
+      <div class="empty-state">
+        <svg class="empty-state__icon"><use href="#i-info"/></svg>
+        <div class="empty-state__title">Couldn't load payments</div>
+        <div class="empty-state__hint">Please refresh and try again.</div>
+      </div>
     `;
   }
 }
@@ -310,7 +346,172 @@ document.addEventListener('DOMContentLoaded', () => {
   };
   
   setTimeout(checkDatabase, 500);
+
+  // Sheet-driven fallback: rows in Google Sheets that have no matching
+  // Firestore booking. Loaded independently of Firestore readiness.
+  loadUnmatchedSheetRows();
 });
+
+// ── Unmatched sheet rows (no Firestore counterpart) ────────────────────────
+const LIST_SHEET_URL = 'https://us-central1-mexicuts-booking.cloudfunctions.net/listSheetUnsettledRows';
+const CONFIRM_SHEET_ROW_URL = 'https://us-central1-mexicuts-booking.cloudfunctions.net/confirmSheetRow';
+const DELETE_SHEET_ROW_URL = 'https://us-central1-mexicuts-booking.cloudfunctions.net/deletePaymentSheetRow';
+const DELETE_PAYMENT_BOOKING_URL = 'https://us-central1-mexicuts-booking.cloudfunctions.net/deletePaymentBooking';
+
+async function deleteSheetRowAction(rowIndex, name) {
+  const confirmed = await customConfirm(
+    '🗑️ Delete row',
+    `Delete the sheet row for "${name || 'this customer'}"? This cannot be undone.`
+  );
+  if (!confirmed) return;
+  try {
+    const res = await fetch(DELETE_SHEET_ROW_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rowIndex })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success) throw new Error(data.message || 'Delete failed');
+    await customAlert('✅ Deleted', 'Sheet row removed.');
+    loadUnmatchedSheetRows();
+  } catch (err) {
+    console.error('Error deleting sheet row:', err);
+    await customAlert('❌ Error', 'Could not delete row: ' + err.message);
+  }
+}
+
+async function deleteBookingPayment(bookingId, name) {
+  const confirmed = await customConfirm(
+    '🗑️ Delete booking',
+    `Delete "${name || 'this booking'}" and remove its sheet row? This cannot be undone.`
+  );
+  if (!confirmed) return;
+  try {
+    const res = await fetch(DELETE_PAYMENT_BOOKING_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bookingId })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success) throw new Error(data.message || 'Delete failed');
+    await customAlert('✅ Deleted', data.removedSheetRow ? 'Booking and sheet row removed.' : 'Booking removed (no matching sheet row found).');
+    loadPendingPayments();
+    loadUnmatchedSheetRows();
+  } catch (err) {
+    console.error('Error deleting booking:', err);
+    await customAlert('❌ Error', 'Could not delete: ' + err.message);
+  }
+}
+
+async function loadUnmatchedSheetRows() {
+  const container = document.getElementById('unmatchedSheetRowsList');
+  if (!container) return;
+
+  try {
+    const res = await fetch(LIST_SHEET_URL);
+    const data = await res.json();
+    if (!res.ok || !data.success) throw new Error(data.message || 'Failed to load sheet rows');
+
+    const rows = Array.isArray(data.rows) ? data.rows : [];
+    if (rows.length === 0) {
+      container.innerHTML = `
+        <div class="empty-state">
+          <svg class="empty-state__icon"><use href="#i-check"/></svg>
+          <div class="empty-state__title">All sheet rows settled</div>
+          <div class="empty-state__hint">Every row in the payment sheet has a When Paid date.</div>
+        </div>
+      `;
+      return;
+    }
+
+    let html = '';
+    rows.forEach(row => {
+      const safeName = (row.who || 'Unknown').replace(/</g, '&lt;');
+      const amountNumber = parseFloat(String(row.amount || '20').replace(/[^0-9.]/g, '')) || 20;
+      html += `
+        <div class="list-card list-card--urgent" data-row-index="${row.rowIndex}">
+          <div class="list-card__row">
+            <div style="flex:1; min-width:0;">
+              <div class="list-card__title">
+                ${safeName}
+                <span class="badge badge--warning">Sheet only</span>
+              </div>
+              <div class="list-card__meta">
+                <div class="list-card__meta-row"><svg><use href="#i-calendar"/></svg>${row.whenCut || '—'}</div>
+                <div class="list-card__meta-row" style="align-items:center;">
+                  <svg><use href="#i-dollar"/></svg>
+                  <span style="display:inline-flex; align-items:center; gap:6px;">
+                    $
+                    <input type="number"
+                           id="sheet-amount-${row.rowIndex}"
+                           value="${amountNumber}"
+                           min="1"
+                           style="width:64px; padding:6px 8px; border-radius:6px; border:1px solid var(--border); background: var(--surface-input); color: var(--text); font-size: var(--text-sm);"
+                           aria-label="Amount for ${safeName}">
+                    <span class="text-tertiary" style="font-size: 11px;">editable</span>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="text-tertiary" style="font-size: var(--text-sm); margin-top: var(--space-3); margin-bottom: var(--space-2);">Confirm payment</div>
+          <div class="btn-group">
+            <button class="btn btn-secondary" type="button" onclick="confirmSheetRowAction(${row.rowIndex}, 'cash')">
+              <svg class="btn-icon"><use href="#i-cash"/></svg>Cash
+            </button>
+            <button class="btn btn-success" type="button" onclick="confirmSheetRowAction(${row.rowIndex}, 'card')">
+              <svg class="btn-icon"><use href="#i-credit-card"/></svg>Card
+            </button>
+          </div>
+          <button class="btn btn-ghost btn-block btn-sm" type="button" style="margin-top: var(--space-2);" onclick="deleteSheetRowAction(${row.rowIndex}, '${safeName.replace(/'/g,"\\'")}')">
+            <svg class="btn-icon"><use href="#i-trash"/></svg>Delete row
+          </button>
+        </div>
+      `;
+    });
+    container.innerHTML = html;
+  } catch (err) {
+    console.error('Error loading unmatched sheet rows:', err);
+    container.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-state__title">Couldn't load sheet rows</div>
+        <div class="empty-state__hint">${err.message}</div>
+      </div>
+    `;
+  }
+}
+
+async function confirmSheetRowAction(rowIndex, paymentMethod) {
+  const amountInput = document.getElementById(`sheet-amount-${rowIndex}`);
+  const amount = amountInput ? parseFloat(amountInput.value) : NaN;
+  if (!Number.isFinite(amount) || amount <= 0) {
+    await customAlert('❌ Invalid Price', 'Please enter a valid price greater than $0.');
+    return;
+  }
+
+  const confirmed = await customConfirm(
+    '💰 Confirm Payment',
+    `Mark this row as paid by ${paymentMethod === 'cash' ? 'Cash' : 'Card'} for $${amount}?`
+  );
+  if (!confirmed) return;
+
+  try {
+    const now = new Date();
+    const paymentDate = `${now.getDate()} ${getMonthName(now.getMonth())} ${now.getFullYear()}`;
+    const res = await fetch(CONFIRM_SHEET_ROW_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rowIndex, paymentMethod, paymentDate, amount })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success) throw new Error(data.message || 'Confirmation failed');
+    await customAlert('✅ Payment Confirmed', 'Sheet row updated.');
+    loadUnmatchedSheetRows();
+  } catch (err) {
+    console.error('Error confirming sheet row:', err);
+    await customAlert('❌ Error', 'Could not confirm: ' + err.message);
+  }
+}
 
 // Test payment sheet auto-add
 async function testPaymentSheetAdd() {
@@ -318,47 +519,59 @@ async function testPaymentSheetAdd() {
   const bookingId = bookingIdInput.value.trim();
   const resultDiv = document.getElementById('testResult');
   
-  if (!bookingId) {
+  const setResult = (state, html) => {
     resultDiv.style.display = 'block';
-    resultDiv.style.background = '#4a1a1a';
-    resultDiv.style.border = '1px solid #f44336';
-    resultDiv.style.color = '#f44336';
-    resultDiv.textContent = '❌ Please enter a Booking ID';
+    resultDiv.innerHTML = html;
+    if (state === 'error') {
+      resultDiv.style.background = 'var(--danger-soft)';
+      resultDiv.style.border = '1px solid rgba(239,68,68,0.4)';
+      resultDiv.style.color = 'var(--danger)';
+    } else if (state === 'success') {
+      resultDiv.style.background = 'var(--success-soft)';
+      resultDiv.style.border = '1px solid rgba(34,197,94,0.4)';
+      resultDiv.style.color = 'var(--success)';
+    } else {
+      resultDiv.style.background = 'var(--surface-2)';
+      resultDiv.style.border = '1px solid var(--border)';
+      resultDiv.style.color = 'var(--text-secondary)';
+    }
+  };
+
+  if (!bookingId) {
+    setResult('error', 'Please enter a booking ID first.');
     return;
   }
-  
-  // Show loading
-  resultDiv.style.display = 'block';
-  resultDiv.style.background = '#2a2a2a';
-  resultDiv.style.border = '1px solid #666';
-  resultDiv.style.color = '#ccc';
-  resultDiv.textContent = '⏳ Testing... This may take a few seconds...';
-  
+
+  setResult('loading', 'Testing… this may take a few seconds.');
+
   try {
     const response = await fetch(`https://testpaymentsheetadd-tktzr4t4nq-uc.a.run.app?bookingId=${bookingId}`);
     const text = await response.text();
-    
+
     if (response.ok) {
-      resultDiv.style.background = '#1a3a1a';
-      resultDiv.style.border = '1px solid #4CAF50';
-      resultDiv.style.color = '#4CAF50';
-      resultDiv.innerHTML = `✅ ${text}<br><br>Check:<br>• Your Google Sheets for the new row<br>• Your email for the notification<br>• The Payments tab below for the pending payment`;
-      
-      // Reload pending payments
-      setTimeout(() => {
-        loadPendingPayments();
-      }, 2000);
+      setResult('success', `${text}<br><br><strong>Now check:</strong><br>• Your Google Sheet for the new row<br>• Your email inbox for the notification<br>• The Payments list above for the pending row`);
+      setTimeout(() => loadPendingPayments(), 2000);
     } else {
-      resultDiv.style.background = '#4a1a1a';
-      resultDiv.style.border = '1px solid #f44336';
-      resultDiv.style.color = '#f44336';
-      resultDiv.textContent = `❌ ${text}`;
+      setResult('error', text);
     }
   } catch (error) {
-    resultDiv.style.background = '#4a1a1a';
-    resultDiv.style.border = '1px solid #f44336';
-    resultDiv.style.color = '#f44336';
-    resultDiv.textContent = `❌ Error: ${error.message}`;
+    setResult('error', `Error: ${error.message}`);
+  }
+}
+
+// Update the price for a booking directly from the payments page
+async function updateBookingPrice(bookingId, newPrice) {
+  const parsed = parseFloat(newPrice);
+  if (isNaN(parsed) || parsed <= 0) {
+    await customAlert('❌ Invalid Price', 'Please enter a valid price greater than $0.');
+    return;
+  }
+  try {
+    await window.db.collection('bookings').doc(bookingId).update({ price: parsed });
+    console.log(`✅ Price updated to $${parsed} for booking ${bookingId}`);
+  } catch (error) {
+    console.error('Error updating price:', error);
+    await customAlert('❌ Error', 'Could not update price: ' + error.message);
   }
 }
 
@@ -368,4 +581,9 @@ window.setPaymentMethod = setPaymentMethod;
 window.confirmPaymentReceived = confirmPaymentReceived;
 window.changePaymentMethod = changePaymentMethod;
 window.testPaymentSheetAdd = testPaymentSheetAdd;
+window.updateBookingPrice = updateBookingPrice;
+window.loadUnmatchedSheetRows = loadUnmatchedSheetRows;
+window.confirmSheetRowAction = confirmSheetRowAction;
+window.deleteSheetRowAction = deleteSheetRowAction;
+window.deleteBookingPayment = deleteBookingPayment;
 

@@ -28,6 +28,7 @@ async function calculateLeaderboard() {
       const lastVisitTimestamp = data.lastVisit;
       leaderboardData.push({
         userId: doc.id,
+        position: data.position || leaderboardData.length + 1,
         name: data.displayName || 'Customer',
         totalVisits: data.totalVisits || 0,
         averageWeeks: data.averageWeeks || 0,
@@ -68,17 +69,13 @@ function parseBookingDate(timeSlot) {
   }
 }
 
-// Format weeks to readable string
+// Format weeks to readable string — always in weeks for consistency
 function formatWeeks(weeks) {
   if (weeks < 1) {
     const days = Math.round(weeks * 7);
     return `${days} day${days !== 1 ? 's' : ''}`;
-  } else if (weeks < 4) {
-    return `${weeks.toFixed(1)} week${weeks >= 2 ? 's' : ''}`;
-  } else {
-    const months = weeks / 4.33; // Average weeks per month
-    return `${months.toFixed(1)} month${months >= 2 ? 's' : ''}`;
   }
+  return `${weeks.toFixed(1)} week${weeks.toFixed(1) !== '1.0' ? 's' : ''}`;
 }
 
 // Display skeleton/placeholder leaderboard
@@ -217,8 +214,21 @@ async function displayLeaderboard() {
     </div>
   `;
 
-  // Calculate leaderboard
-  const leaderboardData = await calculateLeaderboard();
+  const firebaseUser = firebase.auth().currentUser;
+
+  // Load the signed-in customer's private progress as well as the public ranks.
+  // Customers do not get a public leaderboard document until they qualify.
+  const [leaderboardData, currentUserProfile] = await Promise.all([
+    calculateLeaderboard(),
+    firebaseUser
+      ? db.collection('users').doc(firebaseUser.uid).get()
+          .then(doc => doc.exists ? doc.data() : null)
+          .catch(error => {
+            console.error('Error loading leaderboard progress:', error);
+            return null;
+          })
+      : Promise.resolve(null)
+  ]);
 
   // If no data, show skeleton/placeholder
   if (leaderboardData.length === 0) {
@@ -226,8 +236,11 @@ async function displayLeaderboard() {
     return;
   }
 
-  // Take top 10
-  const top10 = leaderboardData.slice(0, 10);
+  // Show the public podium, plus the signed-in customer's position below it.
+  const topThree = leaderboardData.slice(0, 3);
+  const currentUserEntry = firebaseUser
+    ? leaderboardData.find(customer => customer.userId === firebaseUser.uid)
+    : null;
 
   // Build HTML with mobile-responsive styles
   let html = `
@@ -240,8 +253,8 @@ async function displayLeaderboard() {
       <div style="display: flex; flex-direction: column; gap: 12px;">
   `;
 
-  top10.forEach((customer, index) => {
-    const rank = index + 1;
+  topThree.forEach((customer, index) => {
+    const rank = customer.position || index + 1;
     const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `#${rank}`;
     const borderColor = rank === 1 ? '#FFD700' : rank === 2 ? '#C0C0C0' : rank === 3 ? '#CD7F32' : '#555';
     const bgColor = rank === 1 ? 'rgba(255, 215, 0, 0.1)' : rank === 2 ? 'rgba(192, 192, 192, 0.1)' : rank === 3 ? 'rgba(205, 127, 50, 0.1)' : '#1a1a1a';
@@ -308,6 +321,95 @@ async function displayLeaderboard() {
     `;
   });
 
+  // If the signed-in customer is outside the podium, keep their rank visible.
+  if (currentUserEntry && currentUserEntry.position > 3) {
+    const daysSinceLastVisit = Math.floor((new Date() - currentUserEntry.lastVisit) / (1000 * 60 * 60 * 24));
+    const lastVisitText = daysSinceLastVisit === 0 ? 'Today' :
+                          daysSinceLastVisit === 1 ? 'Yesterday' :
+                          `${daysSinceLastVisit} days ago`;
+
+    html += `
+      <div style="display: flex; align-items: center; gap: 10px; margin: 5px 0; color: #777; font-family: 'VT323', monospace;">
+        <span style="height: 1px; flex: 1; background: #444;"></span>
+        <span>Your position</span>
+        <span style="height: 1px; flex: 1; background: #444;"></span>
+      </div>
+
+      <div style="
+        background: rgba(206, 17, 38, 0.12);
+        border: 2px solid #CE1126;
+        border-radius: 10px;
+        padding: 15px;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 12px;
+      ">
+        <div style="font-size: clamp(1.3rem, 5vw, 2rem); font-weight: bold; min-width: 45px; text-align: center; color: #CE1126;">
+          #${currentUserEntry.position}
+        </div>
+
+        <div style="flex: 1; min-width: 120px;">
+          <div style="font-size: clamp(0.85rem, 3.5vw, 1.1rem); font-weight: bold; color: white; margin-bottom: 4px; word-break: break-word;">
+            ${currentUserEntry.name} <span style="color: #CE1126; font-family: 'VT323', monospace;">(You)</span>
+          </div>
+          <div style="font-size: clamp(0.65rem, 2.5vw, 0.8rem); color: #999; display: flex; flex-wrap: wrap; gap: 8px; font-family: 'VT323', monospace;">
+            <span>📊 ${currentUserEntry.totalVisits} visit${currentUserEntry.totalVisits !== 1 ? 's' : ''}</span>
+            <span>📅 ${lastVisitText}</span>
+          </div>
+        </div>
+
+        <div style="text-align: center; padding: 10px 12px; background: rgba(0, 104, 71, 0.2); border: 2px solid #006847; border-radius: 8px; min-width: 80px; flex-shrink: 0;">
+          <div style="font-size: clamp(1rem, 4vw, 1.3rem); font-weight: bold; color: #4CAF50; font-family: 'VT323', monospace;">
+            ${formatWeeks(currentUserEntry.averageWeeks)}
+          </div>
+          <div style="font-size: clamp(0.55rem, 2vw, 0.7rem); color: #999; margin-top: 3px; font-family: 'VT323', monospace;">
+            avg frequency
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  // A customer needs two completed haircuts before an average frequency and
+  // leaderboard position can be calculated. Show their progress until then.
+  if (firebaseUser && !currentUserEntry) {
+    const completedHaircuts = Math.max(
+      0,
+      Number(currentUserProfile?.frequencyStats?.completedBookingsSinceFeb14) || 0
+    );
+    const haircutsNeeded = Math.max(0, 2 - completedHaircuts);
+    const progressPercent = Math.min(100, (completedHaircuts / 2) * 100);
+
+    html += `
+      <div style="display: flex; align-items: center; gap: 10px; margin: 5px 0; color: #777; font-family: 'VT323', monospace;">
+        <span style="height: 1px; flex: 1; background: #444;"></span>
+        <span>Your progress</span>
+        <span style="height: 1px; flex: 1; background: #444;"></span>
+      </div>
+
+      <div style="background: rgba(206, 17, 38, 0.12); border: 2px solid #CE1126; border-radius: 10px; padding: 18px;">
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap;">
+          <div>
+            <div style="font-size: clamp(0.9rem, 3.5vw, 1.15rem); font-weight: bold; color: white; margin-bottom: 6px;">
+              Not ranked yet
+            </div>
+            <div style="font-size: clamp(0.7rem, 2.5vw, 0.9rem); color: #ccc; font-family: 'VT323', monospace; line-height: 1.5;">
+              ${haircutsNeeded} more completed haircut${haircutsNeeded !== 1 ? 's' : ''} needed to unlock your ranking.
+            </div>
+          </div>
+          <div style="color: #4CAF50; font-size: clamp(0.8rem, 3vw, 1rem); font-family: 'VT323', monospace; white-space: nowrap;">
+            ${Math.min(completedHaircuts, 2)} / 2 completed
+          </div>
+        </div>
+
+        <div role="progressbar" aria-label="Leaderboard qualification progress" aria-valuemin="0" aria-valuemax="2" aria-valuenow="${Math.min(completedHaircuts, 2)}" style="height: 8px; margin-top: 14px; overflow: hidden; background: #333; border-radius: 999px;">
+          <div style="height: 100%; width: ${progressPercent}%; background: #006847; border-radius: inherit;"></div>
+        </div>
+      </div>
+    `;
+  }
+
   html += `
       </div>
 
@@ -336,11 +438,19 @@ async function displayLeaderboard() {
 
 // Initialize leaderboard when page loads
 document.addEventListener('DOMContentLoaded', () => {
+  let authListenerAttached = false;
+
   // Wait for Firebase to initialize
   const checkDatabase = () => {
     if (window.db) {
-      console.log('✅ Database ready, loading leaderboard...');
-      displayLeaderboard();
+      if (!authListenerAttached) {
+        authListenerAttached = true;
+        console.log('✅ Database ready, watching authentication for leaderboard...');
+
+        // Waiting for this callback ensures persisted login state has been restored
+        // before deciding whether to show the customer's personal rank.
+        firebase.auth().onAuthStateChanged(() => displayLeaderboard());
+      }
     } else {
       setTimeout(checkDatabase, 500);
     }
@@ -351,4 +461,3 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Export function for manual refresh
 window.refreshLeaderboard = displayLeaderboard;
-

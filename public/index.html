@@ -8,16 +8,23 @@
     <meta name="keywords" content="barbershop, haircut, Peregian Springs, Sunshine Coast, men's grooming, professional barber" />
     
     <!-- Favicon -->
-    <link rel="icon" type="image/png" sizes="32x32" href="images/favicon.png" />
-    <link rel="apple-touch-icon" href="images/favicon.png" />
-    <link rel="shortcut icon" href="images/favicon.png" />
+    <link rel="icon" type="image/png" href="images/admin-favicon.png" />
+    <link rel="apple-touch-icon" href="images/admin-favicon.png" />
+    <link rel="shortcut icon" href="images/admin-favicon.png" />
     
     <!-- Open Graph / Social Media -->
     <meta property="og:type" content="website" />
     <meta property="og:title" content="Mexi Cuts - Professional Barbershop" />
     <meta property="og:description" content="Professional barbershop services in Peregian Springs, Sunshine Coast. Book your appointment online." />
-    <meta property="og:image" content="images/favicon.png" />
+    <meta property="og:image" content="images/admin-favicon.png" />
     
+    <!-- Redirect .web.app visitors to the real domain -->
+    <script>
+      if (window.location.hostname.includes('web.app') || window.location.hostname.includes('firebaseapp.com')) {
+        window.location.replace('https://mexicuts.au' + window.location.pathname + window.location.search);
+      }
+    </script>
+
     <link rel="stylesheet" href="css/style.css" />
   
     <!-- Flatpickr Styles and Script -->
@@ -58,9 +65,14 @@
                 ➕ New Booking
               </a>
               <a href="#" onclick="logout(); toggleAccountMenu();" 
-                 style="display: block; padding: 12px 14px; color: #f44336; text-decoration: none; transition: background 0.2s; font-size: 13px; font-family: 'VT323', monospace;"
+                 style="display: block; padding: 12px 14px; color: #f44336; text-decoration: none; transition: background 0.2s; font-size: 13px; font-family: 'VT323', monospace; border-bottom: 1px solid #333;"
                  onmouseover="this.style.background='#2a2a2a'" onmouseout="this.style.background=''">
                 🚪 Log Out
+              </a>
+              <a href="#" onclick="deleteAccount(); return false;" 
+                 style="display: block; padding: 12px 14px; color: #888; text-decoration: none; transition: background 0.2s; font-size: 13px; font-family: 'VT323', monospace;"
+                 onmouseover="this.style.background='#2a2a2a'; this.style.color='#f44336'" onmouseout="this.style.background=''; this.style.color='#888'">
+                🗑️ Delete Account
               </a>
             </div>
           </div>
@@ -79,7 +91,7 @@
 
   <section id="about">
     <h2>About Mexi_Cuts</h2>
-    <p>The best haircuts for your money. Only $20 with a professional standard. Run by your local teen barber.</p>
+    <p>The best haircuts for your money. Only $20-25 with a professional standard. Run by your local teen barber.</p>
     <p style="font-size: 14px; color: #666; font-style: italic; margin-top: 15px;">
       <em>*You will receive the exact address when you book your appointment</em>
     </p>
@@ -92,7 +104,7 @@
 
   <section id="booking">
     <h2>Book Your MexiCut</h2>
-    <p><strong>Each cut is $20. Times available:</strong><br>
+    <p><strong>Fade or Trim: $20 &nbsp;·&nbsp; Both: $25. Times available:</strong><br>
     Saturdays: 8:00am – 6:00pm<br>
     Tuesdays & Thursdays: 3:30pm – 4:30pm</p>
     
@@ -112,6 +124,30 @@
         <input type="text" placeholder="Full Name" required />
         <input type="tel" placeholder="Phone Number" required />
       </div>
+      <!-- Service selector -->
+      <div id="serviceSelector">
+        <p class="service-label">Select your service: <span style="color:#CE1126;">*</span></p>
+        <div id="serviceOptions">
+          <button type="button" class="service-btn" data-service="Fade" data-price="20">
+            <span class="service-name">Fade</span>
+            <span class="service-price">$20</span>
+          </button>
+          <button type="button" class="service-btn" data-service="Trim" data-price="20">
+            <span class="service-name">Trim</span>
+            <span class="service-price">$20</span>
+          </button>
+          <button type="button" class="service-btn" data-service="Fade + Trim" data-price="25">
+            <span class="service-name">Both</span>
+            <span class="service-price">$25</span>
+          </button>
+        </div>
+        <input type="hidden" id="selectedServiceHidden" name="service" />
+        <input type="hidden" id="selectedPriceHidden" name="price" />
+        <div id="serviceError" style="display:none; color:#f44336; font-size:13px; margin-top:8px; font-weight:600;">
+          ⚠️ Please pick a service before booking.
+        </div>
+      </div>
+
       <textarea placeholder="Notes (optional)"></textarea>
       <!-- calendar and timeSlots will be injected here -->
       <button type="submit">Confirm Booking</button>
@@ -123,10 +159,10 @@
     </div>
     
     <!-- Booking Lookup Section -->
-    <div style="margin-top: 40px; padding-top: 30px; border-top: 2px solid #333;">
+    <div id="manage-booking" style="margin-top: 40px; padding-top: 30px; border-top: 2px solid #333; scroll-margin-top: 20px;">
       <h3 style="color: #CE1126; text-align: center; margin-bottom: 20px;">🔍 Look Up Your Booking</h3>
       <p style="text-align: center; color: #ccc; margin-bottom: 20px; font-size: 14px;">
-        Already have a booking? Enter your phone number to view or cancel it.
+        Already have a booking? Enter your phone number to view, reschedule, or cancel it.
       </p>
       
       <div style="display: flex; gap: 10px; justify-content: center; align-items: center; flex-wrap: wrap;">
@@ -146,8 +182,7 @@
   </section>
 
   <footer id="contact">
-    <p>Contact: 0402098123</p>
-    <p>Follow us <a href="https://www.instagram.com/mexi_cuts/">@mexi_cuts</a> on Instagram</p>
+    <p>Questions or booking help? <a href="https://ig.me/m/mexi_cuts" target="_blank" rel="noopener noreferrer">DM @mexi_cuts on Instagram</a></p>
   </footer>
 
   <!-- Custom Cancellation Modal -->
@@ -164,6 +199,31 @@
         <button id="cancelYesBtn" style="width: 100%; background: #CE1126; color: white; border: none; padding: 14px 20px; border-radius: 6px; cursor: pointer; font-size: clamp(13px, 3.5vw, 15px); font-weight: bold; font-family: 'VT323', monospace;">
           Yes, Cancel
         </button>
+      </div>
+    </div>
+  </div>
+
+  <div id="rescheduleModal" class="reschedule-modal" role="dialog" aria-modal="true" aria-labelledby="rescheduleModalTitle" aria-hidden="true">
+    <div class="reschedule-modal__panel">
+      <div class="reschedule-modal__header">
+        <div>
+          <p class="reschedule-modal__eyebrow">Change appointment</p>
+          <h2 id="rescheduleModalTitle">Choose a new time</h2>
+        </div>
+        <button type="button" id="closeRescheduleModalBtn" class="reschedule-modal__close" aria-label="Close reschedule window">&times;</button>
+      </div>
+      <p id="rescheduleModalCurrent" class="reschedule-modal__current"></p>
+      <div class="reschedule-modal__picker">
+        <label for="rescheduleDate">Select a date</label>
+        <input id="rescheduleDate" type="text" readonly placeholder="Choose a date" />
+        <div id="rescheduleTimeSlots" class="reschedule-time-slots" aria-live="polite">
+          <p class="reschedule-time-slots__hint">Choose a date to see available times.</p>
+        </div>
+      </div>
+      <div id="rescheduleModalError" class="reschedule-modal__error" role="alert" hidden></div>
+      <div class="reschedule-modal__actions">
+        <button type="button" id="keepCurrentBookingBtn" class="reschedule-modal__secondary">Keep current time</button>
+        <button type="button" id="confirmRescheduleBtn" class="reschedule-modal__primary" disabled>Confirm new time</button>
       </div>
     </div>
   </div>
@@ -216,7 +276,7 @@
         <form onsubmit="handleLogin(event)" style="display: flex; flex-direction: column; gap: 12px;">
           <div>
             <label style="display: block; color: #ccc; margin-bottom: 5px; font-size: clamp(12px, 3vw, 14px); font-family: 'VT323', monospace;">📱 Phone Number</label>
-            <input type="tel" id="loginPhone" placeholder="0402098123" required 
+            <input type="tel" id="loginPhone" placeholder="04XX XXX XXX" required
                    style="width: 100%; padding: 14px; border: 1px solid #555; border-radius: 6px; background: #2a2a2a; color: white; font-size: 16px; box-sizing: border-box;">
           </div>
           
@@ -251,13 +311,14 @@
         <form onsubmit="handleSignup(event)" style="display: flex; flex-direction: column; gap: 12px;">
           <div>
             <label style="display: block; color: #ccc; margin-bottom: 5px; font-size: clamp(12px, 3vw, 14px); font-family: 'VT323', monospace;">👤 Full Name</label>
-            <input type="text" id="signupName" placeholder="John Smith" required 
-                   style="width: 100%; padding: 14px; border: 1px solid #555; border-radius: 6px; background: #2a2a2a; color: white; font-size: 16px; box-sizing: border-box;">
+            <input type="text" id="signupName" placeholder="John Smith" required maxlength="75"
+                   style="width: 100%; padding: 14px; border: 1px solid #555; border-radius: 6px; background: #2a2a2a; color: white; font-size: 16px; box-sizing: border-box;"
+                   oninput="validateSignupName(this)">
           </div>
           
           <div>
             <label style="display: block; color: #ccc; margin-bottom: 5px; font-size: clamp(12px, 3vw, 14px); font-family: 'VT323', monospace;">📱 Phone Number</label>
-            <input type="tel" id="signupPhone" placeholder="0402098123" required 
+            <input type="tel" id="signupPhone" placeholder="04XX XXX XXX" required
                    style="width: 100%; padding: 14px; border: 1px solid #555; border-radius: 6px; background: #2a2a2a; color: white; font-size: 16px; box-sizing: border-box;">
             <small style="color: #999; font-size: 11px; display: block; margin-top: 4px; font-family: 'VT323', monospace;">
               We'll use this to link your bookings
@@ -300,14 +361,13 @@
 <script src="js/availability-utils.js"></script>
   <!-- Authentication system -->
   <script src="js/auth.js"></script>
-  <script src="js/user-bookings.js"></script>
+  <script src="js/user-bookings.js?v=5.1"></script>
   <script src="js/auth-ui.js"></script>
   <!-- Leaderboard system -->
   <script src="js/leaderboard.js"></script>
   <!-- Final JS file with calendar + Firebase logic -->
-  <script defer src="js/booking.js?v=5.0"></script>
+  <script defer src="js/booking.js?v=5.5"></script>
 <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
 
 </body>
 </html>
- 

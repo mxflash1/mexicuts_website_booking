@@ -38,7 +38,7 @@ For each user, the system tracks:
 users/
   └── {userId}/
        ├── name: "John Smith"
-       ├── phone: "0402098123"
+       ├── phone: "0412345678"
        ├── createdAt: timestamp
        ├── bookingCount: 5
        └── frequencyStats: {
@@ -196,6 +196,5 @@ Check Firebase Functions logs to monitor:
 The leaderboard frequency tracking system is now live! It will automatically track and rank your most loyal customers based on how frequently they book appointments. The system runs automatically every day, and you can manually trigger updates anytime using the provided endpoint.
 
 Customers will be motivated to book more frequently to climb the leaderboard rankings! 🏆
-
 
 

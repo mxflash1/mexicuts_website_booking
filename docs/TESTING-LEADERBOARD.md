@@ -163,7 +163,7 @@ Average: 4 weeks → Rank #3
 
 **Solution:**
 - Check that the phone number **exactly matches** the user's account phone
-- Phone format should match (e.g., "0402098123")
+- Phone format should match (e.g., "0412345678")
 - User must have a registered account first
 
 ### User Not Appearing on Leaderboard
@@ -262,6 +262,5 @@ If something isn't working:
 3. Ensure user accounts exist before adding bookings
 4. Run the manual stats update endpoint
 5. Hard refresh the website to clear cache
-
 
 
