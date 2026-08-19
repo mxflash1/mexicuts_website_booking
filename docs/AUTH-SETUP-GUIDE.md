@@ -41,7 +41,7 @@ This guide will walk you through setting up the new phone number + password auth
 7. Toggle **Enable** to ON
 8. Click **Save**
 
-**Note:** Even though we're using phone numbers, we're storing them in email format internally (e.g., `0402098123@mexicuts.local`)
+**Note:** Even though we're using phone numbers, we're storing them in email format internally (e.g., `0412345678@mexicuts.local`)
 
 ---
 
@@ -151,8 +151,8 @@ This will upload all the new files and changes to your live website.
 ### **Phone Number as Login**
 
 Since Firebase Auth requires email addresses, we convert phone numbers:
-- User enters: `0402098123`
-- Stored as: `0402098123@mexicuts.local`
+- User enters: `0412345678`
+- Stored as: `0412345678@mexicuts.local`
 - User never sees the `@mexicuts.local` part
 
 ### **Auto-Linking Existing Bookings**
@@ -169,7 +169,7 @@ When someone creates an account:
 ```javascript
 users/
   └── abc123xyz/           // Auto-generated user ID
-       ├── phone: "0402098123"
+       ├── phone: "0412345678"
        ├── name: "John Smith"
        ├── createdAt: timestamp
        └── bookingCount: 5
@@ -180,7 +180,7 @@ users/
 bookings/
   └── xyz789abc/
        ├── name: "John Smith"
-       ├── phone: "0402098123"
+       ├── phone: "0412345678"
        ├── timeSlot: "2025-11-02 10:00 AM"
        ├── notes: "Fade please"
        ├── timestamp: timestamp
@@ -338,4 +338,3 @@ If you encounter issues:
 **🎉 Congratulations! Your authentication system is now live!**
 
 Users can now create accounts, and their experience will be much smoother with auto-fill and booking history.
-

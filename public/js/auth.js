@@ -21,7 +21,7 @@ class AuthManager {
   }
 
   // Convert phone number to email format for Firebase Auth
-  // Example: "0402098123" becomes "0402098123@mexicuts.local"
+  // Example: an Australian mobile number becomes "digits@mexicuts.local"
   phoneToEmail(phone) {
     // Clean phone number (remove spaces, dashes, etc)
     const cleanPhone = phone.replace(/\D/g, '');
@@ -447,4 +447,3 @@ function formatPhoneNumber(phone) {
 
 // Export for use in other files
 window.AuthManager = AuthManager;
-

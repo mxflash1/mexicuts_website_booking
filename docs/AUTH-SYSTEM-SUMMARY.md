@@ -129,7 +129,7 @@ You now have a **complete user authentication system** using phone numbers + pas
 ```javascript
 users/
   └── {userId}/              // Auto-generated unique ID
-       ├── phone: string     // "0402098123"
+       ├── phone: string     // "0412345678"
        ├── name: string      // "John Smith"
        ├── createdAt: timestamp
        └── bookingCount: number
@@ -165,9 +165,9 @@ bookings/
 2. Clicks "Sign Up" link
 3. Enters:
    - Name: "John Smith"
-   - Phone: "0402098123"
+   - Phone: "0412345678"
    - Password: "password123"
-4. System converts phone to email: `0402098123@mexicuts.local`
+4. System converts phone to email: `0412345678@mexicuts.local`
 5. Creates Firebase Auth account
 6. Creates user profile in `users` collection
 7. **Automatically searches for existing bookings with that phone**
@@ -271,7 +271,7 @@ AFTER:
 ┌─────────────────────────┐
 │ Book Your MexiCut       │
 │ Name: John Smith 🔒     │ <- Auto-filled, locked
-│ Phone: 0402098123 🔒    │ <- Auto-filled, locked
+│ Phone: 0412345678 🔒    │ <- Auto-filled, locked
 │ ...                     │
 └─────────────────────────┘
 
@@ -421,8 +421,8 @@ Possible future enhancements:
 ## 📝 **IMPORTANT NOTES**
 
 ### **Phone Number Format**
-- Users can enter: `0402098123` or `+61402098123`
-- System stores as: `0402098123@mexicuts.local` (internally)
+- Users can enter: `0412345678` or `+61412345678`
+- System stores as: `0412345678@mexicuts.local` (internally)
 - Users see: Just their phone number
 
 ### **Guest Bookings Still Work**
@@ -496,4 +496,3 @@ Your customers can create accounts, and their booking experience will be much sm
 **Total Code Added**: ~1,200 lines across 5 new files
 **Time to Implement**: Built in one session!
 **Value**: Enterprise-level feature for your business 🚀
-

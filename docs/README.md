@@ -245,7 +245,7 @@ This project is licensed under the ISC License.
 ## 📞 Support
 
 For technical support or questions:
-- **Business Contact:** 0402098123
+- **Business Contact:** [DM @mexi_cuts on Instagram](https://ig.me/m/mexi_cuts)
 - **Instagram:** [@mexi_cuts](https://www.instagram.com/mexi_cuts/)
 - **Location:** Peregian Springs, Sunshine Coast
 

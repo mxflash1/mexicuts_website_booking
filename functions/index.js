@@ -2,6 +2,7 @@ const functionsV1 = require('firebase-functions');
 const admin = require('firebase-admin');
 const nodemailer = require('nodemailer');
 const twilio = require('twilio');
+const crypto = require('crypto');
 const { google } = require('googleapis');
 const { defineSecret } = require('firebase-functions/params');
 const { onRequest } = require('firebase-functions/v2/https');
@@ -23,6 +24,8 @@ const GOOGLE_SHEETS_CREDENTIALS = defineSecret('GOOGLE_SHEETS_CREDENTIALS');
 const GOOGLE_SHEET_ID = defineSecret('GOOGLE_SHEET_ID');
 const PAYMENT_SHEET_ID = defineSecret('PAYMENT_SHEET_ID');
 const MANAGE_BOOKING_URL = 'https://mexicuts.au/?manage=booking#manage-booking';
+const INSTAGRAM_DM_URL = 'https://ig.me/m/mexi_cuts';
+const OWNER_EMAIL_SHA256 = 'b85acd4b1caf5cdde818a59b4f81f1a75cad45fc94c0e2c88797ec810da23ed6';
 
 function createTransporter() {
   const user = process.env.GMAIL_USER;
@@ -317,7 +320,7 @@ async function handleBookingApproved(bookingData, bookingId) {
       const time = `${timePart} ${ampm}`;
       const service = bookingData.service || 'Haircut';
       const price = bookingData.price || 20;
-      const smsMessage = `Mexi Cuts appointment confirmed\nDate: ${formattedDate}\nTime: ${time}\nService: ${service} ($${price})\nLocation: 6 Rosella Tce, Peregian Springs\nMaps: https://maps.google.com/?q=6+Rosella+Tce,+Peregian+Springs,+Sunshine+Coast,+QLD,+Australia\nReschedule or cancel: ${MANAGE_BOOKING_URL}\nContact: 0402098123\nDO NOT REPLY`;
+      const smsMessage = `Mexi Cuts appointment confirmed\nDate: ${formattedDate}\nTime: ${time}\nService: ${service} ($${price})\nLocation: 6 Rosella Tce, Peregian Springs\nMaps: https://maps.google.com/?q=6+Rosella+Tce,+Peregian+Springs,+Sunshine+Coast,+QLD,+Australia\nReschedule or cancel: ${MANAGE_BOOKING_URL}\nQuestions? DM @mexi_cuts: ${INSTAGRAM_DM_URL}\nDO NOT REPLY`;
 
       await client.messages.create({
         body: smsMessage,
@@ -550,7 +553,7 @@ exports.notifyReschedule = onRequest(
         `New date: ${formattedDate}\nNew time: ${time}\n` +
         `Location: 6 Rosella Tce, Peregian Springs\n` +
         `Reschedule or cancel: ${MANAGE_BOOKING_URL}\n` +
-        `Questions? Call/text 0402098123. DO NOT REPLY`;
+        `Questions? DM @mexi_cuts: ${INSTAGRAM_DM_URL}. DO NOT REPLY`;
 
       const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
       const msg = await twilioClient.messages.create({
@@ -810,7 +813,7 @@ exports.rescheduleBooking = onRequest(
           `Hi ${updatedBooking.name || 'there'}, your Mexi Cuts appointment has been rescheduled.\n` +
           `New date: ${formattedDate}\nNew time: ${time}\n` +
           `Reschedule or cancel: ${MANAGE_BOOKING_URL}\n` +
-          `Questions? Call/text 0402098123. DO NOT REPLY`;
+          `Questions? DM @mexi_cuts: ${INSTAGRAM_DM_URL}. DO NOT REPLY`;
         const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
         await client.messages.create({
           body: message,
@@ -1183,7 +1186,7 @@ exports.sendAppointmentReminders = onSchedule(
             const time = `${timePart} ${ampm}`;
             const service = booking.service || 'Haircut';
             const price = booking.price || 20;
-            const reminderMessage = `Mexi Cuts appointment tomorrow\nDate: ${formattedDate}\nTime: ${time}\nService: ${service} ($${price})\nLocation: 6 Rosella Tce, Peregian Springs\nMaps: https://maps.google.com/?q=6+Rosella+Tce,+Peregian+Springs,+Sunshine+Coast,+QLD,+Australia\nReschedule or cancel: ${MANAGE_BOOKING_URL}\nContact: 0402098123\nArrive 5 min early. DO NOT REPLY`;
+            const reminderMessage = `Mexi Cuts appointment tomorrow\nDate: ${formattedDate}\nTime: ${time}\nService: ${service} ($${price})\nLocation: 6 Rosella Tce, Peregian Springs\nMaps: https://maps.google.com/?q=6+Rosella+Tce,+Peregian+Springs,+Sunshine+Coast,+QLD,+Australia\nReschedule or cancel: ${MANAGE_BOOKING_URL}\nQuestions? DM @mexi_cuts: ${INSTAGRAM_DM_URL}\nArrive 5 min early. DO NOT REPLY`;
             
             await client.messages.create({
               body: reminderMessage,
@@ -1312,7 +1315,7 @@ exports.sendTestSMS = onRequest(
       await client.messages.create({
         body: testMessage,
         from: process.env.TWILIO_PHONE_NUMBER, // Use purchased Twilio phone number
-        to: formatPhoneNumber(req.query.phone || '0402098123') // Format phone number for international SMS
+        to: formatPhoneNumber(req.query.phone || '0400000000') // Non-customer fallback for test messages
       });
       
       console.log("✅ Test SMS sent");
@@ -1335,7 +1338,7 @@ exports.testGoogleSheetsBackup = onRequest(
     try {
       const testBookingData = {
         name: 'Test Customer',
-        phone: '0402098123',
+        phone: '0400000000',
         timeSlot: 'Test Time Slot',
         notes: 'This is a test booking for Google Sheets backup',
         timestamp: admin.firestore.Timestamp.now()
@@ -2354,7 +2357,7 @@ exports.fixMissingUserDocuments = onRequest(
           // This Auth user is missing a Firestore document
           console.log(`❌ Missing Firestore document for: ${authUser.email}`);
           
-          // Extract phone from email (format: 0402098123@mexicuts.local)
+          // Extract phone from the internal digits@mexicuts.local email format.
           const phone = authUser.email ? authUser.email.split('@')[0] : '';
           
           // Count bookings with this phone number
@@ -2418,7 +2421,7 @@ exports.fixMissingUserDocuments = onRequest(
 );
 
 // HTTP endpoint to promote the barber owner account to admin (custom claim).
-// Only the specific owner account (0402098123@mexicuts.local) is allowed.
+// Only the owner account is allowed; compare a hash so the identifier is not exposed in source.
 exports.promoteSelfToAdmin = onRequest(
   {
     region: 'us-central1',
@@ -2451,9 +2454,9 @@ exports.promoteSelfToAdmin = onRequest(
       const uid = decoded.uid;
       const email = decoded.email || '';
 
-      const OWNER_EMAIL = '0402098123@mexicuts.local';
+      const emailHash = crypto.createHash('sha256').update(email).digest('hex');
 
-      if (email !== OWNER_EMAIL) {
+      if (emailHash !== OWNER_EMAIL_SHA256) {
         console.warn('promoteSelfToAdmin called by non-owner account:', email);
         res.status(403).json({ success: false, isAdmin: false, message: 'Not authorized' });
         return;

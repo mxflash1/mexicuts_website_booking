@@ -926,7 +926,7 @@ function addToCalendar(timeSlot, customerName, serviceLabel, servicePrice) {
     const svcPrice = servicePrice ? `$${servicePrice}` : '$20';
     const eventDetails = {
       title: 'Mexi Cuts - Haircut Appointment',
-      description: `Haircut appointment with Mexi Cuts\n\nService: ${svcName}\nPrice: ${svcPrice}\nLocation: 6 Rosella Tce, Peregian Springs, Sunshine Coast, QLD\nContact: 0402098123\nInstagram: @mexi_cuts\n\nPlease arrive 5 minutes early.`,
+      description: `Haircut appointment with Mexi Cuts\n\nService: ${svcName}\nPrice: ${svcPrice}\nLocation: 6 Rosella Tce, Peregian Springs, Sunshine Coast, QLD\nQuestions? DM @mexi_cuts: https://ig.me/m/mexi_cuts\n\nPlease arrive 5 minutes early.`,
       location: '6 Rosella Tce, Peregian Springs, Sunshine Coast, QLD, Australia',
       startTime: startTime,
       endTime: endTime
