@@ -27,14 +27,9 @@ service cloud.firestore {
     
     // Bookings collection (private)
     match /bookings/{bookingId} {
-      // Admins can create any booking. Regular signed-in users can only create
-      // their own (userId must match their auth uid).
-      allow create: if isAdmin()
-        || (isSignedIn()
-          && request.resource.data.timeSlot is string
-          && request.resource.data.name is string
-          && request.resource.data.phone is string
-          && request.resource.data.userId == request.auth.uid);
+      // Customer bookings must go through the Cloud Function, where limits and
+      // slot locking are enforced atomically. Admin SDK writes bypass rules.
+      allow create: if isAdmin();
       
       // Users can read their own bookings; admins can read all.
       allow read: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
@@ -64,4 +59,3 @@ service cloud.firestore {
     }
   }
 }
-

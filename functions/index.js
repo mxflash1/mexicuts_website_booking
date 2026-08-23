@@ -66,9 +66,20 @@ function formatPhoneNumber(phone) {
 function parseAppointmentTime(timeSlot) {
   try {
     // timeSlot format: "2025-08-23 05:30 PM"
-    const [datePart, timePart, ampm] = timeSlot.split(' ');
-    const [year, month, day] = datePart.split('-');
-    const [hour, minute] = timePart.split(':');
+    const match = String(timeSlot || '').trim().match(
+      /^(\d{4})-(\d{2})-(\d{2})\s+(\d{1,2}):(\d{2})\s+(AM|PM)$/i
+    );
+    if (!match) return null;
+    const [, year, month, day, hour, minute, ampmRaw] = match;
+    const ampm = ampmRaw.toUpperCase();
+
+    const monthNumber = Number(month);
+    const dayNumber = Number(day);
+    const hourNumber = Number(hour);
+    const minuteNumber = Number(minute);
+    if (monthNumber < 1 || monthNumber > 12 || dayNumber < 1 || dayNumber > 31 || hourNumber < 1 || hourNumber > 12 || minuteNumber > 59) {
+      return null;
+    }
     
     let hour24 = parseInt(hour);
     if (ampm === 'PM' && hour24 !== 12) {
@@ -81,8 +92,7 @@ function parseAppointmentTime(timeSlot) {
     // Cloud Functions run in UTC, so we need to explicitly handle Brisbane timezone
     const dateString = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}T${String(hour24).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00+10:00`;
     const appointmentDate = new Date(dateString);
-    
-    return appointmentDate;
+    return Number.isNaN(appointmentDate.getTime()) ? null : appointmentDate;
   } catch (error) {
     console.error('Error parsing appointment time:', timeSlot, error);
     return null;
@@ -98,6 +108,25 @@ function slotDocIdFromTimeSlot(timeSlot) {
     .replace(/\s+/g, '_')
     .replace(/[^a-z0-9_:+-]/g, '_')
     .slice(0, 200);
+}
+
+function normalizeAustralianPhone(phone) {
+  const digits = String(phone || '').replace(/\D/g, '');
+  if (digits.length === 10 && digits.startsWith('0')) return `61${digits.slice(1)}`;
+  if (digits.length === 11 && digits.startsWith('61')) return digits;
+  return digits;
+}
+
+function rateLimitDocId(prefix, value) {
+  return `${prefix}_${crypto.createHash('sha256').update(String(value)).digest('hex')}`;
+}
+
+async function getOptionalRequestUser(req) {
+  const authorization = String(req.headers.authorization || '');
+  if (!authorization.startsWith('Bearer ')) return null;
+  const token = authorization.slice(7).trim();
+  if (!token) return null;
+  return auth.verifyIdToken(token);
 }
 
 // Function to format date in readable format (e.g., "24, August, Wednesday")
@@ -130,8 +159,10 @@ function isAppointmentTomorrow(appointmentDate) {
   console.log(`Appointment time: ${appointmentDate.toLocaleString('en-AU', { timeZone: 'Australia/Brisbane' })}`);
   console.log(`Hours difference: ${hoursDiff.toFixed(2)}`);
   
-  // Check if appointment is exactly 24 hours away (±15 minutes for function timing)
-  return hoursDiff >= 23.75 && hoursDiff <= 24.25;
+  // Once a reminder becomes due, keep it eligible until the appointment. This
+  // prevents a temporary scheduler failure or malformed booking from causing a
+  // later booking's reminder to be missed permanently.
+  return hoursDiff > 0 && hoursDiff <= 24.25;
 }
 
 async function isConfiguredBookingSlot(db, timeSlot) {
@@ -356,7 +387,7 @@ exports.createGuestBooking = onRequest(
   async (req, res) => {
     res.set('Access-Control-Allow-Origin', '*');
     res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.set('Access-Control-Allow-Headers', 'Content-Type');
+    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
     if (req.method === 'OPTIONS') {
       res.status(204).send('');
@@ -370,6 +401,15 @@ exports.createGuestBooking = onRequest(
 
     try {
       const { name, phone, timeSlot, notes, service, price, deviceId } = req.body || {};
+      let requestUser;
+      try {
+        requestUser = await getOptionalRequestUser(req);
+      } catch (authError) {
+        console.warn('Rejected booking with an invalid auth token:', authError.message);
+        res.status(401).json({ success: false, message: 'Your login session is invalid. Please log in again.' });
+        return;
+      }
+      const isAdminRequest = Boolean(requestUser && requestUser.admin === true);
 
       if (!name || !phone || !timeSlot) {
         res.status(400).json({ success: false, message: 'Missing required fields' });
@@ -400,6 +440,12 @@ exports.createGuestBooking = onRequest(
         return;
       }
 
+      const normalizedPhone = normalizeAustralianPhone(phone);
+      if (normalizedPhone.length !== 11 || !normalizedPhone.startsWith('61')) {
+        res.status(400).json({ success: false, message: 'Please enter a valid Australian phone number.' });
+        return;
+      }
+
       const slotId = slotDocIdFromTimeSlot(timeSlot);
       if (!slotId) {
         res.status(400).json({ success: false, message: 'Invalid time slot' });
@@ -408,10 +454,18 @@ exports.createGuestBooking = onRequest(
 
       const db = admin.firestore();
 
+      if (!(await isConfiguredBookingSlot(db, timeSlot))) {
+        res.status(400).json({ success: false, message: 'That appointment time is not available.' });
+        return;
+      }
+
       // ── Registered-account check ─────────────────────────────────────────
       // If this phone number already has an account, reject guest booking.
-      const existingUser = await db.collection('users').where('phone', '==', phone.trim()).get();
-      if (!existingUser.empty) {
+      const phoneCandidates = [phone.trim(), normalizedPhone, `0${normalizedPhone.slice(2)}`];
+      const existingUserChecks = await Promise.all(
+        [...new Set(phoneCandidates)].map(candidate => db.collection('users').where('phone', '==', candidate).limit(1).get())
+      );
+      if (!requestUser && existingUserChecks.some(snapshot => !snapshot.empty)) {
         res.status(403).json({
           success: false,
           message: '📱 This number is already linked to an account. Please log in to book.'
@@ -420,69 +474,51 @@ exports.createGuestBooking = onRequest(
       }
       // ─────────────────────────────────────────────────────────────────────
 
-      // ── Three-layer rate limiting ────────────────────────────────────────
+      // All limit checks and reservations happen in the booking transaction.
+      // This prevents a parallel burst from passing multiple pre-flight checks.
       const TEN_MIN_MS = 10 * 60 * 1000;
-      const tenMinutesAgo = new Date(Date.now() - TEN_MIN_MS);
-
-      function rateLimitMsg(lastBookingDate) {
-        const remaining = Math.ceil((TEN_MIN_MS - (Date.now() - lastBookingDate.getTime())) / 60000);
-        const plural = remaining === 1 ? 'minute' : 'minutes';
-        return `⏳ Please wait ${remaining} more ${plural} before making another booking. To avoid this, make an account.`;
-      }
-
-      const devKey = (deviceId && typeof deviceId === 'string' && deviceId.length > 0)
-        ? 'dev_' + deviceId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 100)
-        : null;
-
-      // Layer 1 (server): Device fingerprint check
-      if (devKey) {
-        const devDoc = await db.collection('rateLimits').doc(devKey).get();
-        if (devDoc.exists) {
-          const last = devDoc.data().lastBooking;
-          if (last && last.toDate() > tenMinutesAgo) {
-            res.status(429).json({ success: false, message: rateLimitMsg(last.toDate()) });
-            return;
-          }
-        }
-      }
-
-      // Layer 2 (server): IP address check
       const rawIp = (req.headers['x-forwarded-for'] || req.ip || '').split(',')[0].trim();
-      const ipKey = rawIp ? 'ip_' + rawIp.replace(/[.:]/g, '_') : null;
-      if (ipKey) {
-        const ipDoc = await db.collection('rateLimits').doc(ipKey).get();
-        if (ipDoc.exists) {
-          const last = ipDoc.data().lastBooking;
-          if (last && last.toDate() > tenMinutesAgo) {
-            res.status(429).json({ success: false, message: rateLimitMsg(last.toDate()) });
-            return;
+      const limiterRefs = [];
+      if (!isAdminRequest) {
+        limiterRefs.push(db.collection('rateLimits').doc(rateLimitDocId('phone', normalizedPhone)));
+        if (requestUser) {
+          limiterRefs.push(db.collection('rateLimits').doc(rateLimitDocId('uid', requestUser.uid)));
+        } else {
+          if (rawIp) limiterRefs.push(db.collection('rateLimits').doc(rateLimitDocId('ip', rawIp)));
+          if (deviceId && typeof deviceId === 'string') {
+            limiterRefs.push(db.collection('rateLimits').doc(rateLimitDocId('device', deviceId.slice(0, 200))));
           }
         }
       }
-
-      // Layer 3 (server): Phone number check — find most recent booking to get exact countdown
-      const recentByPhone = await db.collection('bookings').where('phone', '==', phone.trim()).get();
-      const recentPhoneDocs = recentByPhone.docs.filter(doc => {
-        const ts = doc.data().timestamp;
-        return ts && ts.toDate() > tenMinutesAgo;
-      });
-      if (recentPhoneDocs.length > 0) {
-        const latestTs = recentPhoneDocs
-          .map(doc => doc.data().timestamp.toDate())
-          .sort((a, b) => b - a)[0];
-        res.status(429).json({ success: false, message: rateLimitMsg(latestTs) });
-        return;
-      }
-      // ─────────────────────────────────────────────────────────────────────
 
       const slotRef = db.collection('bookedSlots').doc(slotId);
       const bookingRef = db.collection('bookings').doc(); // auto id
 
       await db.runTransaction(async (tx) => {
-        const slotDoc = await tx.get(slotRef);
+        const [slotDoc, ...limiterDocs] = await tx.getAll(slotRef, ...limiterRefs);
         if (slotDoc.exists) {
           throw new Error('SLOT_TAKEN');
         }
+
+        const nowMs = Date.now();
+        const cutoffMs = nowMs - TEN_MIN_MS;
+        const maxBookings = requestUser ? 4 : 1;
+        const nextLimiterValues = limiterDocs.map(doc => {
+          const recent = doc.exists && Array.isArray(doc.data().bookingTimes)
+            ? doc.data().bookingTimes
+              .map(value => value && value.toMillis ? value.toMillis() : 0)
+              .filter(value => value > cutoffMs)
+            : [];
+          if (recent.length >= maxBookings) throw new Error('RATE_LIMITED');
+          return [...recent.map(value => admin.firestore.Timestamp.fromMillis(value)), admin.firestore.Timestamp.fromMillis(nowMs)];
+        });
+
+        limiterRefs.forEach((ref, index) => {
+          tx.set(ref, {
+            bookingTimes: nextLimiterValues[index],
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+          });
+        });
 
         tx.set(slotRef, {
           timeSlot,
@@ -490,7 +526,7 @@ exports.createGuestBooking = onRequest(
           createdAt: admin.firestore.FieldValue.serverTimestamp()
         });
 
-        tx.set(bookingRef, {
+        const bookingData = {
           name: name.trim(),
           phone: phone.trim(),
           timeSlot: timeSlot.trim(),
@@ -498,29 +534,26 @@ exports.createGuestBooking = onRequest(
           service: trimmedService,
           price: typeof price === 'number' && price > 0 ? price : 20,
           timestamp: admin.firestore.FieldValue.serverTimestamp(),
-          guest: true,
+          guest: !requestUser,
           status: 'pending'
-        });
+        };
+        if (requestUser) bookingData.userId = requestUser.uid;
+        tx.set(bookingRef, bookingData);
       });
-
-      // Record this booking in rateLimits for future checks
-      const rlBatch = db.batch();
-      if (devKey) {
-        rlBatch.set(db.collection('rateLimits').doc(devKey), {
-          lastBooking: admin.firestore.FieldValue.serverTimestamp()
-        });
-      }
-      if (ipKey) {
-        rlBatch.set(db.collection('rateLimits').doc(ipKey), {
-          lastBooking: admin.firestore.FieldValue.serverTimestamp()
-        });
-      }
-      await rlBatch.commit();
 
       res.json({ success: true, bookingId: bookingRef.id });
     } catch (err) {
       if (err && err.message === 'SLOT_TAKEN') {
         res.status(409).json({ success: false, message: 'That time slot was just booked. Please choose another.' });
+        return;
+      }
+      if (err && err.message === 'RATE_LIMITED') {
+        res.status(429).json({
+          success: false,
+          message: requestUser
+            ? 'You can make up to 4 bookings every 10 minutes. Please wait before trying again.'
+            : 'Please wait 10 minutes before making another booking.'
+        });
         return;
       }
       console.error('❌ createGuestBooking error:', err);
@@ -1168,9 +1201,10 @@ exports.sendAppointmentReminders = onSchedule(
         const timeDiff = appointmentDate.getTime() - now.getTime();
         const hoursDiff = timeDiff / (1000 * 60 * 60);
         console.log(`Hours until appointment: ${hoursDiff.toFixed(2)}`);
-        console.log(`Should send reminder: ${hoursDiff >= 23.75 && hoursDiff <= 24.25}`);
+        console.log(`Should send reminder: ${hoursDiff > 0 && hoursDiff <= 24.25}`);
         
-        // Check if this appointment is exactly 24 hours away (±15 minutes)
+        // Send once the appointment is within 24 hours. reminderSent makes this
+        // idempotent, while the wider recovery window prevents permanent misses.
         if (isAppointmentTomorrow(appointmentDate)) {
           // Check if we've already sent a reminder for this booking
           if (booking.reminderSent) {
@@ -1180,13 +1214,10 @@ exports.sendAppointmentReminders = onSchedule(
           
           try {
             // Send reminder SMS
-            const formattedDate = formatReadableDate(booking.timeSlot);
             // Extract time from timeSlot (format: "2025-08-23 05:30 PM")
             const [, timePart, ampm] = booking.timeSlot.split(' ');
             const time = `${timePart} ${ampm}`;
-            const service = booking.service || 'Haircut';
-            const price = booking.price || 20;
-            const reminderMessage = `Mexi Cuts appointment tomorrow\nDate: ${formattedDate}\nTime: ${time}\nService: ${service} ($${price})\nLocation: 6 Rosella Tce, Peregian Springs\nMaps: https://maps.google.com/?q=6+Rosella+Tce,+Peregian+Springs,+Sunshine+Coast,+QLD,+Australia\nReschedule or cancel: ${MANAGE_BOOKING_URL}\nQuestions? DM @mexi_cuts: ${INSTAGRAM_DM_URL}\nArrive 5 min early. DO NOT REPLY`;
+            const reminderMessage = `Reminder: Your Mexi Cuts appointment is tomorrow at ${time}. See you then! DO NOT REPLY`;
             
             await client.messages.create({
               body: reminderMessage,

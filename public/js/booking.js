@@ -133,9 +133,14 @@ async function createGuestBooking(data) {
   const baseUrl = getFunctionsBaseUrl();
   if (!baseUrl) throw new Error('Missing projectId for functions URL');
 
+  const firebaseUser = firebase.auth().currentUser;
+  const idToken = firebaseUser ? await firebaseUser.getIdToken() : null;
+  const headers = { 'Content-Type': 'application/json' };
+  if (idToken) headers.Authorization = `Bearer ${idToken}`;
+
   const res = await fetch(`${baseUrl}/createGuestBooking`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify({
       name: data.name,
       phone: data.phone,
@@ -696,44 +701,15 @@ document.addEventListener("DOMContentLoaded", async () => {
         return;
       }
 
-      // If logged in, create booking directly (rules require userId match).
-      // If guest, create booking via Cloud Function (keeps bookings private + prevents public writes).
+      // Every booking goes through the server so account, phone, device and IP
+      // limits cannot be bypassed with direct Firestore requests.
       if (authManager && authManager.isLoggedIn()) {
         const currentUser = authManager.getCurrentUser();
         if (currentUser) {
           data.userId = currentUser.uid;
-
-          // Server-side rate limit for clients: max 4 bookings within 10 minutes.
-          // Filter by timestamp in JS to avoid needing a Firestore composite index.
-          const TEN_MIN_MS = 10 * 60 * 1000;
-          const TEN_MIN_AGO = new Date(Date.now() - TEN_MIN_MS);
-          const allUserSnap = await db.collection('bookings')
-            .where('userId', '==', currentUser.uid)
-            .get();
-          const recentDocs = allUserSnap.docs.filter(d => {
-            const ts = d.data().timestamp;
-            if (!ts) return false;
-            const t = ts.toDate ? ts.toDate() : new Date(ts);
-            return t > TEN_MIN_AGO;
-          });
-          if (recentDocs.length >= 4) {
-            const timestamps = recentDocs
-              .map(d => d.data().timestamp)
-              .map(t => (t.toDate ? t.toDate() : new Date(t)));
-            timestamps.sort((a, b) => a - b);
-            const oldest = timestamps[0];
-            const minsLeft = oldest
-              ? Math.ceil((TEN_MIN_MS - (Date.now() - oldest.getTime())) / 60000)
-              : 10;
-            const plural = minsLeft === 1 ? 'minute' : 'minutes';
-            showPopup(`⏳ Please wait ${minsLeft} more ${plural} before making another booking.`);
-            return;
-          }
         }
-        await db.collection("bookings").add(data);
-      } else {
-        await createGuestBooking(data);
       }
+      await createGuestBooking(data);
       
       // Update user's booking count if logged in
       if (data.userId) {
