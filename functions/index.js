@@ -1626,9 +1626,9 @@ async function sendPaymentReminderEmail(booking, bookingId) {
             </p>
             
             <div style="text-align: center; margin-top: 25px;">
-              <a href="https://mexicuts-booking.web.app/admin_mxcts2010.html" 
+              <a href="https://mexicuts-booking.web.app/admin_mxcts2010.html?tab=payments"
                  style="background: #CE1126; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: bold;">
-                Go to Admin Panel
+                Go to Payments
               </a>
             </div>
             

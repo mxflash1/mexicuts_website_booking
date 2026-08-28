@@ -646,7 +646,7 @@
       const tabEl = document.getElementById(tabName + '-tab');
       if (tabEl) tabEl.classList.add('active');
 
-      const navBtn = (event && event.target) ? event.target.closest('.nav-item') : null;
+      const navBtn = document.querySelector(`.nav-item[aria-controls="${tabName}-tab"]`);
       if (navBtn) {
         navBtn.classList.add('active');
         navBtn.setAttribute('aria-selected', 'true');
@@ -669,6 +669,13 @@
       if (tabName === 'calendar' && typeof window.refitAdminCalendar === 'function') {
         window.refitAdminCalendar();
       }
+    }
+
+    // Allow links from notifications to open a specific admin section.
+    const requestedTab = new URLSearchParams(window.location.search).get('tab');
+    const validTabs = ['calendar', 'pending', 'hours', 'payments', 'clients', 'leaderboard'];
+    if (validTabs.includes(requestedTab)) {
+      switchTab(requestedTab);
     }
 
     async function loadAdminLeaderboard() {
